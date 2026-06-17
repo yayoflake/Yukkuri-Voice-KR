@@ -1,21 +1,44 @@
 # 윳쿠리 보이스 (한국어) 🗣️
 
 한국어 텍스트를 **가타카나(음성기호열)** 로 변환해 **AquesTalk1** 윳쿠리 보이스로 읽어주는
-**서버 없는 순수 브라우저 정적 앱**입니다. (백엔드 없음 / 빌드 도구 없이 바로 실행)
+**서버 없는 순수 브라우저 정적 앱**입니다. 백엔드도, 설치도, 회원가입도 없습니다.
+
+### ▶ 바로 사용하기: **https://yayoflake.github.io/Yukkuri-Voice-KR/**
+
+텍스트를 입력하고 ▶ 재생을 누르면 됩니다. PC·모바일 브라우저에서 모두 동작합니다.
+
+> 모든 처리는 **브라우저 안에서** 일어납니다. 입력한 텍스트는 서버로 전송되지 않습니다.
+> 음성 엔진은 페이지의 정적 파일에서 받아오므로 별도 외부 API 호출이 없습니다.
 
 - 음성 엔진: [`aquestalk.js`](https://www.npmjs.com/package/aquestalk.js) — AquesTalk(Win32 DLL)를
   v86(x86 에뮬레이터, WebAssembly) 위에서 브라우저에서 구동.
 - 일본어 G2P(한자 읽기) 불필요. AquesTalk는 **가타카나 + 액센트**를 그대로 받으므로,
   한국어를 가타카나로 근사 변환해 그대로 넘깁니다.
 
-## 실행 방법
+## 사용법
 
-### 원클릭 (Windows)
+1. 위 주소에 접속합니다.
+2. **읽을 한국어**를 입력하면 아래 **가나 칸**에 변환 결과가 실시간으로 채워집니다.
+3. **음성(8종)** 과 **속도(50–300)** 를 고르고 **▶ 재생**.
+4. 어색한 부분은 **가나 칸을 직접 수정**해 그대로 재생할 수 있습니다. (가타카나 ↔ 히라가나 토글 지원)
 
-**`실행.bat` 더블클릭** → 서버가 켜지고 브라우저가 자동으로 열립니다. 창을 닫으면 종료됩니다.
-(Node.js만 설치돼 있으면 됩니다: https://nodejs.org)
+> 페이지를 처음 연 뒤 첫 재생 시, 음성 엔진(에뮬레이터)을 불러오느라 수십 초 걸릴 수 있습니다.
+> 한 번 로드되면 이후엔 빠릅니다.
 
-### 명령줄
+## 배포 / 호스팅
+
+이 저장소는 정적 파일만으로 구성되어 어떤 정적 호스팅에도 그대로 올릴 수 있습니다.
+빌드 단계가 없고 서버 코드도 필요 없습니다.
+
+- **GitHub Pages** — `main` 브랜치에 push하면 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)이
+  자동으로 사이트 전체를 배포합니다. (저장소 Settings → Pages → Source: **GitHub Actions** 한 번만 설정)
+- **그 외**(Netlify / Cloudflare Pages / Vercel / 사내 정적 서버 등) — 저장소 루트를
+  그대로 정적 디렉터리로 지정하면 됩니다. 특별한 응답 헤더(COOP/COEP 등)는 필요 없습니다.
+
+배포에 필요한 자산은 `index.html`, `app.js`, `k2k.js`, `numread.js`, `vendor/`, `voices/` 뿐입니다.
+**`node_modules/`는 배포에 불필요**하며 `.gitignore`로 제외되어 있습니다.
+
+## 로컬에서 실행 (개발용)
 
 브라우저의 ES 모듈/`fetch` 정책상 `file://` 직접 열기는 안 되고 **정적 서버**가 필요합니다.
 
@@ -28,8 +51,7 @@ python -m http.server 8000
 브라우저에서 **http://localhost:8000** 접속 → 텍스트 입력 → ▶ 재생.
 (자동 열기를 끄려면 `NO_OPEN=1`, 포트 변경은 `PORT=9000`.)
 
-> 최초 재생 시 음성 엔진(에뮬레이터)을 불러오느라 수십 초 걸릴 수 있습니다. 이후엔 빠릅니다.
-> 인터넷 연결 없이 동작합니다(모든 의존성은 `vendor/aquestalk.bundle.js`로 번들).
+> Windows에서는 `실행.bat` 더블클릭으로도 서버 실행 + 브라우저 자동 열기가 됩니다. (Node.js 필요)
 
 ## 파일 구성
 
@@ -38,10 +60,12 @@ python -m http.server 8000
 | `index.html` | UI (텍스트 입력 + 음성/속도 + 재생 + 가타카나 표시) |
 | `app.js` | 변환·합성·재생 글루 코드 |
 | `k2k.js` | **한국어 → 가타카나 변환기** (핵심 로직) |
+| `numread.js` | 숫자 → 한국어 읽기 변환 |
 | `vendor/aquestalk.bundle.js` | `aquestalk.js` + 의존성(v86/jszip/encoding-japanese) 단일 번들 |
 | `voices/*.zip`, `voices/v86.wasm` | 음성 데이터 및 에뮬레이터 WASM |
-| `serve.mjs` | 의존성 없는 정적 서버 |
-| `test/` | Node/헤드리스 브라우저 검증 스크립트 |
+| `serve.mjs` | 의존성 없는 정적 서버 (로컬 개발용) |
+| `.github/workflows/deploy.yml` | GitHub Pages 자동 배포 워크플로 |
+| `test/` | Node/헤드리스 브라우저 검증 스크립트 (개발용) |
 
 ## 변환 규칙 (`k2k.js`)
 
@@ -72,21 +96,14 @@ python -m http.server 8000
 > 액센트는 기본값이라 억양은 어색할 수 있습니다.
 > 어색한 단어는 화면의 **가나 칸을 직접 고쳐서** 재생할 수 있습니다.
 
-## UI 기능
-
-- **가나 칸 직접 편집** — 변환 결과를 손으로 고쳐 그대로 재생(합성)할 수 있음.
-- **가타카나 / 히라가나 토글** — 표기를 바꿔서 보거나 편집. (합성은 내부에서 가타카나로 정규화)
-- **재생 / 정지** — 재생 중 버튼이 `■ 정지`로 바뀜. 중복 재생 안 됨.
-- **음성 8종 · 속도(50–300) 선택.**
-
-## 검증
+## 검증 (개발용)
 
 ```bash
 npm test                       # 변환 결과 출력 + AquesTalk 합성 성공 여부 (Node)
 node test/validate-browser.mjs # 실제 Chrome(헤드리스)로 브라우저 경로 검증 (puppeteer-core 필요)
 ```
 
-`test/` 검증 스크립트는 `node_modules`(개발용)를 사용합니다. **앱 실행 자체에는 `node_modules`가 필요 없습니다.**
+`test/` 검증 스크립트는 `node_modules`(개발용)를 사용합니다. **앱 실행·배포 자체에는 `node_modules`가 필요 없습니다.**
 
 ## 라이선스
 
@@ -94,3 +111,4 @@ node test/validate-browser.mjs # 실제 Chrome(헤드리스)로 브라우저 경
 - `aquestalk.js`: MIT.
 - **AquesTalk 엔진의 저작권은 주식회사 아쿠에스트(AQUEST)에 있습니다.** 음성 zip 내
   `AqLicence.txt`의 [아쿠에스트 라이선스 규정](https://www.a-quest.com/licence.html)을 따르세요.
+  공개 호스팅 시 위 라이선스 규정(특히 비상업/표기 조건)을 반드시 확인하세요.
