@@ -128,6 +128,7 @@ const LONG_MARKS = "-‐‑‒–—―－−ｰ";
 function tokenize(text) {
   const tokens = [];
   let lastSyl = null;          // 운율 기호(' / -)를 붙일 직전 음절 토큰
+  let pendingBoundary = false; // 직전에 공백이 있었나 (다음 음절을 새 어절로 표시)
   for (const ch of text) {
     const code = ch.codePointAt(0);
     if (code >= HANGUL_BASE && code <= HANGUL_LAST) {
@@ -139,7 +140,9 @@ function tokenize(text) {
         jong: JONG_PARTS[JONG[s % 28]].slice(),
         coda: '',
         suffix: '',            // 음절 뒤에 그대로 붙는 운율 기호 (' 또는 ー)
+        boundaryBefore: pendingBoundary, // 앞에 공백(어절 경계)이 있었음
       };
+      pendingBoundary = false;
       tokens.push(tok);
       lastSyl = tok;
     } else if (ACCENT_MARKS.includes(ch)) {
@@ -152,18 +155,21 @@ function tokenize(text) {
       // 줄바꿈: 문장 끝으로 보고 쉼(。)
       tokens.push({ type: 'sep', kana: '。' });
       lastSyl = null;
+      pendingBoundary = false;
     } else if (/\s/.test(ch)) {
-      // 공백(줄바꿈 제외)은 악센트구 경계로 본다. 단, 음절을 끊으면 연음·유성음화가
-      // 차단돼 발음이 바뀌므로(예: "책 읽기"→チェイッキ), 토큰은 끊지 않고 앞 음절 뒤에
-      // 악센트구 구분자 / 만 단다. (쉼 없이 억양만 분리)  책 읽기 → チェ/ギッキ
-      if (lastSyl) lastSyl.suffix += '/';
+      // 공백(줄바꿈 제외)은 어절 경계로 본다. 다음 음절에 boundaryBefore를 달아
+      // 연음·ㅎ약화가 어절을 넘지 못하게 막고(샤인머스캣 알아 → …ケ/アラ, ケ サラ ✗),
+      // 출력 때 악센트구 구분자 / 를 넣는다. (유성음화·비음화는 경계를 넘어 유지)
+      pendingBoundary = true;
       continue;
     } else if ('.!?…。！？'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '。' });
       lastSyl = null;
+      pendingBoundary = false;
     } else if (',、·､'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '、' });
       lastSyl = null;
+      pendingBoundary = false;
     }
     // 그 외(라틴/숫자 등)는 AquesTalk가 읽지 못하므로 건너뜀
   }
@@ -178,6 +184,7 @@ function applyHWeakening(tokens) {
   for (let i = 0; i < tokens.length - 1; i++) {
     const cur = tokens[i], nxt = tokens[i + 1];
     if (cur.type !== 'syl' || nxt.type !== 'syl') continue;
+    if (nxt.boundaryBefore) continue; // 어절 경계 너머로는 ㅎ약화 안 함
     if (nxt.cho !== 'ㅎ' || cur.jong.length === 0) continue;
     const last = cur.jong[cur.jong.length - 1];
     if ('ㄴㅁㅇㄹ'.includes(last)) nxt.cho = 'ㅇ'; // ㅎ → ㅇ(무자음). 받침은 연음 단계에서 넘어감
@@ -190,6 +197,7 @@ function applyLiaison(tokens) {
   for (let i = 0; i < tokens.length - 1; i++) {
     const cur = tokens[i], nxt = tokens[i + 1];
     if (cur.type !== 'syl' || nxt.type !== 'syl') continue;
+    if (nxt.boundaryBefore) continue; // 어절 경계 너머로는 연음 안 함 (캣 알아 → ケ アラ, ケ サラ ✗)
     if (cur.jong.length && nxt.cho === 'ㅇ' && !(cur.jong.length === 1 && cur.jong[0] === 'ㅇ')) {
       let parts = cur.jong.filter((c) => c !== 'ㅎ'); // ㅎ 탈락(좋아→조아)
       if (parts.length === 0) cur.jong = [];
@@ -290,12 +298,19 @@ export function koreanToKatakana(text) {
     const t = tokens[i];
     if (t.type === 'sep') { out.push(t.kana); continue; }
 
-    // 유성음화 판정: 바로 앞이 음절이고, 그 코다가 모음/비음/유음이면 유성
+    // 악센트구 경계: 앞이 음절이면 / 를 넣는다 (문두·쉼 뒤면 생략)
     const prev = tokens[i - 1];
+    if (t.boundaryBefore && prev && prev.type === 'syl') out.push('/');
+
+    // 유성음화 판정: 바로 앞이 음절이고, 그 코다가 모음/비음/유음이면 유성
+    // (어절 경계를 넘어서도 유지 — 전 가요 → ジョンガヨ)
     const voiced = prev && prev.type === 'syl' && VOICED_CODA.has(prev.coda);
 
+    // 다음이 같은 어절의 음절일 때만 코다를 "뒤에 음절이 옴"으로 본다.
+    // 다음이 새 어절(boundaryBefore)이거나 음절이 아니면 코다는 어말로 처리
+    // → 파열음 받침은 촉음 ッ 없이 떨어진다 (샤인머스캣 알아 → …ケ/アラ).
     const next = tokens[i + 1];
-    const nextCho = next && next.type === 'syl' ? next.cho : null;
+    const nextCho = next && next.type === 'syl' && !next.boundaryBefore ? next.cho : null;
     const [glide, base] = JUNG[t.jung];
     const row = onsetRow(t.cho, voiced);
     out.push(buildMora(row, glide, base) + codaKana(t.coda, nextCho) + t.suffix);
