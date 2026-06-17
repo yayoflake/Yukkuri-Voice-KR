@@ -139,6 +139,21 @@ function tokenize(text) {
   return tokens;
 }
 
+// ── 0) ㅎ 약화 ────────────────────────────────────────────────────
+// 공명음(ㄴ/ㅁ/ㅇ/ㄹ) 받침 뒤의 ㅎ은 모음 사이에서 약화·탈락한다.
+// 연음보다 먼저 적용해야 받침이 다음 음절로 넘어간다.
+//   대단하다 → 대단아다 → (연음) 대다나다,  융합 → 융압,  결혼 → 겨론
+function applyHWeakening(tokens) {
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const cur = tokens[i], nxt = tokens[i + 1];
+    if (cur.type !== 'syl' || nxt.type !== 'syl') continue;
+    if (nxt.cho !== 'ㅎ' || cur.jong.length === 0) continue;
+    const last = cur.jong[cur.jong.length - 1];
+    if ('ㄴㅁㅇㄹ'.includes(last)) nxt.cho = 'ㅇ'; // ㅎ → ㅇ(무자음). 받침은 연음 단계에서 넘어감
+  }
+  return tokens;
+}
+
 // ── 1) 연음 + 구개음화 ────────────────────────────────────────────
 function applyLiaison(tokens) {
   for (let i = 0; i < tokens.length - 1; i++) {
@@ -177,8 +192,6 @@ function applyAssimilation(tokens) {
     // 격음화: ㅎ받침 + 예사소리, 또는 예사소리받침 + ㅎ
     if (L.jong.length === 1 && L.jong[0] === 'ㅎ' && ASPIRATE[O]) { O = ASPIRATE[O]; C = ''; }
     else if (O === 'ㅎ' && ASPIRATE[C]) { O = ASPIRATE[C]; C = ''; }
-    // ㅇ받침 뒤 ㅎ 약화: 융합→융압 (ㅎ을 ㅇ으로)
-    else if (C === 'ㅇ' && O === 'ㅎ') { O = 'ㅇ'; }
 
     if (C) {
       // 유음화
@@ -236,6 +249,7 @@ function codaKana(coda, nextCho) {
 // ── 메인 변환 ─────────────────────────────────────────────────────
 export function koreanToKatakana(text) {
   let tokens = tokenize(text);
+  tokens = applyHWeakening(tokens);
   tokens = applyLiaison(tokens);
   tokens = reduceCodas(tokens);
   tokens = applyAssimilation(tokens);
