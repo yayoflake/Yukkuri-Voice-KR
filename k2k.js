@@ -144,8 +144,10 @@ function tokenize(text) {
       tokens.push({ type: 'sep', kana: '。' });
       lastSyl = null;
     } else if (/\s/.test(ch)) {
-      // 공백(줄바꿈 제외)은 무시한다. 단어 경계로 두면 띄어쓰기가 연음·유성음화를
-      // 차단해 발음이 바뀌므로(예: "책 읽기"→チェイッキ), 붙여 쓴 것과 동일하게 처리한다.
+      // 공백(줄바꿈 제외)은 악센트구 경계로 본다. 단, 음절을 끊으면 연음·유성음화가
+      // 차단돼 발음이 바뀌므로(예: "책 읽기"→チェイッキ), 토큰은 끊지 않고 앞 음절 뒤에
+      // 악센트구 구분자 / 만 단다. (쉼 없이 억양만 분리)  책 읽기 → チェ/ギッキ
+      if (lastSyl) lastSyl.suffix += '/';
       continue;
     } else if ('.!?…。！？'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '。' });
@@ -292,8 +294,10 @@ export function koreanToKatakana(text) {
 
   // 구분자 정리
   let kana = out.join('');
+  kana = kana.replace(/\/?([、。])\/?/g, '$1');               // 쉼표·마침표(쉼) 옆의 / 는 잉여 → 제거
   kana = kana.replace(/[、。]+/g, (m) => (m.includes('。') ? '。' : '、'));
-  kana = kana.replace(/^[、。]+|[、。]+$/g, '');
+  kana = kana.replace(/\/{2,}/g, '/');                        // 연속 악센트구 구분자 → 하나
+  kana = kana.replace(/^[、。\/]+|[、。\/]+$/g, '');            // 양 끝의 구분자 제거
   return { kana };
 }
 
