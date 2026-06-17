@@ -110,30 +110,49 @@ function neutCluster(parts) {
 // ── 텍스트 → 토큰 ─────────────────────────────────────────────────
 const HANGUL_BASE = 0xac00, HANGUL_LAST = 0xd7a3;
 
+// 운율 기호로 인식할 입력 문자(키보드/자동고침 변형 포함).
+//   · 악센트핵: 아포스트로피 ' 류 (음이 내려가는 자리)
+//   · 장음    : 하이픈 - 류 / 반각 장음 ｰ
+const ACCENT_MARKS = "'‘’ʹ´`";
+const LONG_MARKS = "-‐‑‒–—―－−ｰ";
+
 function tokenize(text) {
   const tokens = [];
+  let lastSyl = null;          // 운율 기호(' / -)를 붙일 직전 음절 토큰
   for (const ch of text) {
     const code = ch.codePointAt(0);
     if (code >= HANGUL_BASE && code <= HANGUL_LAST) {
       const s = code - HANGUL_BASE;
-      tokens.push({
+      const tok = {
         type: 'syl',
         cho: CHO[Math.floor(s / 588)],
         jung: Math.floor(s / 28) % 21,
         jong: JONG_PARTS[JONG[s % 28]].slice(),
         coda: '',
-      });
+        suffix: '',            // 음절 뒤에 그대로 붙는 운율 기호 (' 또는 ー)
+      };
+      tokens.push(tok);
+      lastSyl = tok;
+    } else if (ACCENT_MARKS.includes(ch)) {
+      // 악센트핵: 바로 앞 음절 뒤에 ' 를 단다. 발음 규칙에는 영향을 주지 않는다.
+      if (lastSyl) lastSyl.suffix += "'";
+    } else if (LONG_MARKS.includes(ch)) {
+      // 장음: 하이픈을 앞 음절의 장음 기호 ー 로. (아- → アー).  발음 규칙엔 영향 없음.
+      if (lastSyl) lastSyl.suffix += 'ー';
     } else if (ch === '\n' || ch === '\r') {
       // 줄바꿈: 문장 끝으로 보고 쉼(。)
       tokens.push({ type: 'sep', kana: '。' });
+      lastSyl = null;
     } else if (/\s/.test(ch)) {
       // 공백(줄바꿈 제외)은 무시한다. 단어 경계로 두면 띄어쓰기가 연음·유성음화를
       // 차단해 발음이 바뀌므로(예: "책 읽기"→チェイッキ), 붙여 쓴 것과 동일하게 처리한다.
       continue;
     } else if ('.!?…。！？'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '。' });
+      lastSyl = null;
     } else if (',、·､'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '、' });
+      lastSyl = null;
     }
     // 그 외(라틴/숫자 등)는 AquesTalk가 읽지 못하므로 건너뜀
   }
@@ -268,7 +287,7 @@ export function koreanToKatakana(text) {
     const nextCho = next && next.type === 'syl' ? next.cho : null;
     const [glide, base] = JUNG[t.jung];
     const row = onsetRow(t.cho, voiced);
-    out.push(buildMora(row, glide, base) + codaKana(t.coda, nextCho));
+    out.push(buildMora(row, glide, base) + codaKana(t.coda, nextCho) + t.suffix);
   }
 
   // 구분자 정리
@@ -287,8 +306,8 @@ export function koreanToKatakana(text) {
 // AquesTalk1은 ' 와 ー 를 그대로 받으므로 합성 직전에 한 번만 적용하면 된다.
 export function normalizeProsody(s) {
   return s
-    .replace(/[‘’ʹ´`]/g, "'")
-    .replace(/[-‐‑‒–—―－−ｰ]/g, 'ー');
+    .replace(new RegExp(`[${ACCENT_MARKS}]`, 'g'), "'")
+    .replace(new RegExp(`[${LONG_MARKS}]`, 'g'), 'ー');
 }
 
 // ── 가타카나 ↔ 히라가나 ───────────────────────────────────────────
