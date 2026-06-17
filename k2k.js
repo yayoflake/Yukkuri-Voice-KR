@@ -71,11 +71,20 @@ const ROWS = {
 };
 const BASE_IDX = { a:0, i:1, u:2, e:3, o:4 };
 
+// 외래음(タ/ダ행의 i·u열 보정): 일본어 タ行은 i열이 チ(chi)·u열이 ツ(tsu)라
+// 한국어 티/디/투/두/트/드가 전부 チ/ジ/ツ/ズ로 뭉개진다. 한국어 원음을 살려
+// AquesTalk1이 받아주는 ティ/トゥ·ディ/ドゥ로 따로 매핑한다. (디오→ティオ, 파티→パティ)
+const FOREIGN_TD = { t: { i:'ティ', u:'トゥ' }, d: { i:'ディ', u:'ドゥ' } };
+
 // 자음 행 + 활음 + 기본모음 → 가타카나 1모라
 function buildMora(row, glide, base) {
   const R = ROWS[row];
   const idx = BASE_IDX[base];
-  if (glide === '') return R[idx];
+  if (glide === '') {
+    const f = FOREIGN_TD[row];
+    if (f && f[base]) return f[base];
+    return R[idx];
+  }
   if (glide === 'y') {
     if (row === '') return { a:'ヤ', u:'ユ', o:'ヨ', e:'イェ', i:'イ' }[base];
     if (base === 'i') return R[1];
