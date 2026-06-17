@@ -127,8 +127,9 @@ function tokenize(text) {
       // 줄바꿈: 문장 끝으로 보고 쉼(。)
       tokens.push({ type: 'sep', kana: '。' });
     } else if (/\s/.test(ch)) {
-      // 공백: 쉼(、)을 넣지 않는다. 단 단어 경계로는 작동(연음·유성음화 차단)
-      tokens.push({ type: 'sep', kana: '' });
+      // 공백(줄바꿈 제외)은 무시한다. 단어 경계로 두면 띄어쓰기가 연음·유성음화를
+      // 차단해 발음이 바뀌므로(예: "책 읽기"→チェイッキ), 붙여 쓴 것과 동일하게 처리한다.
+      continue;
     } else if ('.!?…。！？'.includes(ch)) {
       tokens.push({ type: 'sep', kana: '。' });
     } else if (',、·､'.includes(ch)) {
