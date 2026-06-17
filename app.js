@@ -1,6 +1,6 @@
 // app.js — UI 글루: 한국어 → 가타카나 변환 후 AquesTalk1로 합성/재생
 import { load } from './vendor/aquestalk.bundle.js';
-import { koreanToKatakana, kataToHira, hiraToKata } from './k2k.js';
+import { koreanToKatakana, kataToHira, hiraToKata, normalizeProsody } from './k2k.js';
 import { normalizeNumbers } from './numread.js';
 
 const $ = (id) => document.getElementById(id);
@@ -72,8 +72,9 @@ async function onPlayClick() {
   if (busy) return;
   if (currentAudio) { stopPlayback(); setStatus('정지됨'); setPlayUI('idle'); return; }
 
-  // 재생 기준은 (편집 가능한) 가나 칸. 히라가나가 섞여 있어도 합성용으로 가타카나로 정규화
-  const kana = hiraToKata(kanaEl.value).trim();
+  // 재생 기준은 (편집 가능한) 가나 칸. 히라가나가 섞여 있어도 합성용으로 가타카나로 정규화하고,
+  // 운율 보조 표기(악센트핵 ' / 하이픈→장음 ー)도 AquesTalk1이 받는 형태로 정리한다.
+  const kana = normalizeProsody(hiraToKata(kanaEl.value)).trim();
   if (!kana) { setStatus('가나가 비어 있음', true); return; }
 
   busy = true;

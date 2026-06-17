@@ -58,6 +58,8 @@
     background:#faf7ef; font-size:20px; letter-spacing:.5px; line-height:1.5;
     font-family:inherit; color:var(--text);
   }
+  .hint { margin:8px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
+  .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
   .status { margin-top:12px; min-height:18px; font-size:13px; color:var(--muted); }
   .status.err { color:var(--accent2); }
 </style>
@@ -101,6 +103,10 @@
         </div>
       </div>
       <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
+      <p class="hint">
+        억양: 음이 내려가는 자리에 <code>'</code> &nbsp;·&nbsp; 장음(길게): <code>-</code> 또는 <code>ー</code><br>
+        예) <code>コンニ'チワ</code>, <code>ア-</code>
+      </p>
     </div>
 
     <div class="status" id="status"></div>
