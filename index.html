@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>윳쿠리 보이스 (한국어)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🗣️</text></svg>" />
+<style>
+  :root { --bg:#f4f1ea; --card:#fffdf7; --accent:#d96a4a; --accent2:#b5532f; --line:#e3ddcf; --text:#332f29; --muted:#8a8378; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--text);
+    font-family:"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+    padding:24px;
+  }
+  .card {
+    width:100%; max-width:560px; background:var(--card); border:1px solid var(--line);
+    border-radius:16px; padding:28px 26px; box-shadow:0 8px 30px rgba(0,0,0,.06);
+  }
+  h1 { margin:0 0 4px; font-size:22px; }
+  .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+  label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  textarea {
+    width:100%; min-height:96px; resize:vertical; padding:12px 14px; font-size:16px;
+    border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--text);
+    font-family:inherit; line-height:1.5;
+  }
+  textarea:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-top:6px; }
+  .row > div { flex:1 1 140px; }
+  select, input[type=range] { width:100%; }
+  select {
+    padding:9px 10px; border:1px solid var(--line); border-radius:10px; background:#fff;
+    font-size:14px; color:var(--text);
+  }
+  .speedval { color:var(--muted); font-weight:400; }
+  button {
+    margin-top:18px; width:100%; padding:13px; font-size:16px; font-weight:700;
+    color:#fff; background:var(--accent); border:none; border-radius:10px; cursor:pointer;
+    transition:background .15s;
+  }
+  button:hover:not(:disabled) { background:var(--accent2); }
+  button:disabled { opacity:.55; cursor:default; }
+  .kana-wrap { margin-top:24px; }
+  .kana-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .kana-head label { margin:0; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button {
+    margin:0; width:auto; padding:6px 14px; font-size:12px; font-weight:600; border-radius:0;
+    background:#fff; color:var(--muted); transition:none;
+  }
+  .seg button.active { background:var(--accent); color:#fff; }
+  .seg button:hover:not(.active) { background:#f0ebe0; }
+  textarea.kana {
+    width:100%; min-height:64px; resize:vertical;
+    padding:12px 14px; border:1px dashed var(--line); border-radius:10px;
+    background:#faf7ef; font-size:20px; letter-spacing:.5px; line-height:1.5;
+    font-family:inherit; color:var(--text);
+  }
+  .status { margin-top:12px; min-height:18px; font-size:13px; color:var(--muted); }
+  .status.err { color:var(--accent2); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>윳쿠리 보이스 🗣️</h1>
+    <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
+
+    <label for="text">읽을 한국어</label>
+    <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
+
+    <div class="row">
+      <div>
+        <label for="voice">음성</label>
+        <select id="voice">
+          <option value="f1">여성 1 (f1)</option>
+          <option value="f2">여성 2 (f2)</option>
+          <option value="m1">남성 1 (m1)</option>
+          <option value="m2">남성 2 (m2)</option>
+          <option value="dvd">로봇 (dvd)</option>
+          <option value="imd1">악마 (imd1)</option>
+          <option value="jgr">신사 (jgr)</option>
+          <option value="r1">아이 (r1)</option>
+        </select>
+      </div>
+      <div>
+        <label for="speed">속도 <span class="speedval" id="speedval">100</span></label>
+        <input type="range" id="speed" min="50" max="300" step="10" value="100" />
+      </div>
+    </div>
+
+    <button id="play">▶ 재생</button>
+
+    <div class="kana-wrap">
+      <div class="kana-head">
+        <label for="kana">변환된 가나 (직접 수정 가능)</label>
+        <div class="seg" id="script">
+          <button type="button" data-script="kata" class="active">가타카나</button>
+          <button type="button" data-script="hira">히라가나</button>
+        </div>
+      </div>
+      <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

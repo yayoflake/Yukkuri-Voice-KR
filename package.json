@@ -1,0 +1,14 @@
+{
+  "name": "yukkuri-voice-kr",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "한국어 텍스트를 가타카나로 변환해 윳쿠리 보이스(AquesTalk1)로 읽어주는 정적 웹앱",
+  "scripts": {
+    "serve": "node serve.mjs",
+    "test": "node test/validate.mjs"
+  },
+  "dependencies": {
+    "aquestalk.js": "^1.0.6"
+  }
+}
