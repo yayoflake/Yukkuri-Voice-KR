@@ -25,19 +25,6 @@
 > 페이지를 처음 연 뒤 첫 재생 시, 음성 엔진(에뮬레이터)을 불러오느라 수십 초 걸릴 수 있습니다.
 > 한 번 로드되면 이후엔 빠릅니다.
 
-## 배포 / 호스팅
-
-이 저장소는 정적 파일만으로 구성되어 어떤 정적 호스팅에도 그대로 올릴 수 있습니다.
-빌드 단계가 없고 서버 코드도 필요 없습니다.
-
-- **GitHub Pages** — `main` 브랜치에 push하면 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)이
-  자동으로 사이트 전체를 배포합니다. (저장소 Settings → Pages → Source: **GitHub Actions** 한 번만 설정)
-- **그 외**(Netlify / Cloudflare Pages / Vercel / 사내 정적 서버 등) — 저장소 루트를
-  그대로 정적 디렉터리로 지정하면 됩니다. 특별한 응답 헤더(COOP/COEP 등)는 필요 없습니다.
-
-배포에 필요한 자산은 `index.html`, `app.js`, `k2k.js`, `numread.js`, `vendor/`, `voices/` 뿐입니다.
-**`node_modules/`는 배포에 불필요**하며 `.gitignore`로 제외되어 있습니다.
-
 ## 로컬에서 실행 (개발용)
 
 브라우저의 ES 모듈/`fetch` 정책상 `file://` 직접 열기는 안 되고 **정적 서버**가 필요합니다.
@@ -64,7 +51,6 @@ python -m http.server 8000
 | `vendor/aquestalk.bundle.js` | `aquestalk.js` + 의존성(v86/jszip/encoding-japanese) 단일 번들 |
 | `voices/*.zip`, `voices/v86.wasm` | 음성 데이터 및 에뮬레이터 WASM |
 | `serve.mjs` | 의존성 없는 정적 서버 (로컬 개발용) |
-| `.github/workflows/deploy.yml` | GitHub Pages 자동 배포 워크플로 |
 | `test/` | Node/헤드리스 브라우저 검증 스크립트 (개발용) |
 
 ## 변환 규칙 (`k2k.js`)
@@ -111,4 +97,3 @@ node test/validate-browser.mjs # 실제 Chrome(헤드리스)로 브라우저 경
 - `aquestalk.js`: MIT.
 - **AquesTalk 엔진의 저작권은 주식회사 아쿠에스트(AQUEST)에 있습니다.** 음성 zip 내
   `AqLicence.txt`의 [아쿠에스트 라이선스 규정](https://www.a-quest.com/licence.html)을 따르세요.
-  공개 호스팅 시 위 라이선스 규정(특히 비상업/표기 조건)을 반드시 확인하세요.
