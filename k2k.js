@@ -176,7 +176,25 @@ function tokenize(text) {
   return tokens;
 }
 
-// ── 0) ㅎ 약화 ────────────────────────────────────────────────────
+// ── 0) 조사 '의' → [에] ───────────────────────────────────────────
+// 관형격 조사 '의'는 표준발음상 [에]로 읽는다. (주변의→주벼네, 나의→나에)
+// 조건: ㅇ+ㅢ 단독 음절이면서 (1) 어두가 아니고(앞에 같은 어절 음절이 있고)
+//       (2) 어절 끝(뒤가 새 어절·구두점·문장끝)인 경우만. 연음보다 먼저 적용.
+//   → 주의를·회의에서처럼 뒤에 조사가 붙는 한자어 '의'는 [이]로 남고(둘째 조건 탈락),
+//     의사·의미 같은 어두 '의'도 그대로 둔다(첫째 조건 탈락).
+//   한계: 한자어가 어절 끝일 때(회의 시작·민주주의)는 [에]가 되지만, 더 흔한 조사 쪽을 택함.
+function applyEuiParticle(tokens) {
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i], prev = tokens[i - 1], next = tokens[i + 1];
+    if (t.type !== 'syl' || prev.type !== 'syl') continue;
+    if (!(t.cho === 'ㅇ' && t.jung === 19 && t.jong.length === 0 && !t.boundaryBefore)) continue;
+    const euljeolFinal = !next || next.type !== 'syl' || next.boundaryBefore;
+    if (euljeolFinal) t.jung = 5; // ㅢ(19) → ㅔ(5)
+  }
+  return tokens;
+}
+
+// ── 1) ㅎ 약화 ────────────────────────────────────────────────────
 // 공명음(ㄴ/ㅁ/ㅇ/ㄹ) 받침 뒤의 ㅎ은 모음 사이에서 약화·탈락한다.
 // 연음보다 먼저 적용해야 받침이 다음 음절로 넘어간다.
 //   대단하다 → 대단아다 → (연음) 대다나다,  융합 → 융압,  결혼 → 겨론
@@ -303,6 +321,7 @@ function codaKana(coda, nextCho) {
 // ── 메인 변환 ─────────────────────────────────────────────────────
 export function koreanToKatakana(text) {
   let tokens = tokenize(text);
+  tokens = applyEuiParticle(tokens);
   tokens = applyHWeakening(tokens);
   tokens = applyLiaison(tokens);
   tokens = reduceCodas(tokens);
