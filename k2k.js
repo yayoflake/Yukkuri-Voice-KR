@@ -158,8 +158,8 @@ function tokenize(text) {
       pendingBoundary = false;
     } else if (/\s/.test(ch)) {
       // 공백(줄바꿈 제외)은 어절 경계로 본다. 다음 음절에 boundaryBefore를 달아
-      // 연음·ㅎ약화가 어절을 넘지 못하게 막고(샤인머스캣 알아 → …ケ/アラ, ケ サラ ✗),
-      // 출력 때 악센트구 구분자 / 를 넣는다. (유성음화·비음화는 경계를 넘어 유지)
+      // 연음을 절음(받침→대표음 후 연음)으로 처리하고(샤인머스캣 알아 → …ケダラ),
+      // ㅎ약화는 막으며, 연음으로 안 묶인 경계엔 악센트구 구분자 / 를 넣는다.
       pendingBoundary = true;
       continue;
     } else if ('.!?…。！？'.includes(ch)) {
@@ -197,8 +197,23 @@ function applyLiaison(tokens) {
   for (let i = 0; i < tokens.length - 1; i++) {
     const cur = tokens[i], nxt = tokens[i + 1];
     if (cur.type !== 'syl' || nxt.type !== 'syl') continue;
-    if (nxt.boundaryBefore) continue; // 어절 경계 너머로는 연음 안 함 (캣 알아 → ケ アラ, ケ サラ ✗)
-    if (cur.jong.length && nxt.cho === 'ㅇ' && !(cur.jong.length === 1 && cur.jong[0] === 'ㅇ')) {
+    const canLiaise = cur.jong.length && nxt.cho === 'ㅇ' &&
+                      !(cur.jong.length === 1 && cur.jong[0] === 'ㅇ');
+    if (!canLiaise) continue;
+
+    if (nxt.boundaryBefore) {
+      // 어절 경계 = 절음(絶音). 받침을 7종 대표음으로 바꾼 뒤(ㅅ→ㄷ, ㅋ→ㄱ, ㅍ→ㅂ …)
+      // 그 대표음만 다음 음절 초성으로 넘긴다. 겹받침은 대표음 하나만 넘기고 나머진 탈락.
+      //   옷 안에→오단에,  샤인머스캣 알아→…캐달아(ケダラ),  닭 앞→다가파
+      const rep = neutCluster(cur.jong);
+      cur.jong = [];
+      if (rep && rep !== 'ㅇ') {
+        nxt.cho = rep;
+        nxt.boundaryBefore = false; // 연음으로 묶였으니 악센트구 / 경계는 해제
+      }
+      // 절음은 실질형태소 앞이라 구개음화(ㄷ+ㅣ→ㅈ) 대상이 아니므로 적용하지 않는다.
+    } else {
+      // 같은 어절 안: 원음 그대로 연음(옷이→오시), 겹받침은 앞 자음만 남김(닭이→달기)
       let parts = cur.jong.filter((c) => c !== 'ㅎ'); // ㅎ 탈락(좋아→조아)
       if (parts.length === 0) cur.jong = [];
       else if (parts.length === 1) { cur.jong = []; nxt.cho = parts[0]; }
@@ -307,8 +322,8 @@ export function koreanToKatakana(text) {
     const voiced = prev && prev.type === 'syl' && VOICED_CODA.has(prev.coda);
 
     // 다음이 같은 어절의 음절일 때만 코다를 "뒤에 음절이 옴"으로 본다.
-    // 다음이 새 어절(boundaryBefore)이거나 음절이 아니면 코다는 어말로 처리
-    // → 파열음 받침은 촉음 ッ 없이 떨어진다 (샤인머스캣 알아 → …ケ/アラ).
+    // 연음으로 묶이지 않은 어절 경계(boundaryBefore)나 비음절 앞이면 코다는 어말로 처리
+    // → 파열음 받침은 촉음 ッ 없이 떨어진다 (밥 먹어 → パン/モゴ).
     const next = tokens[i + 1];
     const nextCho = next && next.type === 'syl' && !next.boundaryBefore ? next.cho : null;
     const [glide, base] = JUNG[t.jung];
