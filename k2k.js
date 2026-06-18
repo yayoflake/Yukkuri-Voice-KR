@@ -12,6 +12,10 @@
 //   · 비음화          : 파열음 받침 + ㄴ/ㅁ → 비음             입니다→임니다, 국물→궁물
 //   · 유성음화         : 모음/비음 사이 ㄱㄷㅂㅈ → 탁음(g/d/b/j)  아버지→アボジ
 // 일본어에 없는 음(ㅓ→오, ㅡ→우, ㅐ/ㅔ→에)은 가장 가까운 가타카나로 근사한다.
+//
+// 규칙으로 못 잡는 닫힌 예외(한자어 '의' 등)는 발음 예외 사전(dict.js)으로 보정한다.
+
+import { WORD_OVERRIDES } from './dict.js';
 
 // ── 한글 자모 테이블 ───────────────────────────────────────────────
 const CHO = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
@@ -318,9 +322,16 @@ function codaKana(coda, nextCho) {
   return '';
 }
 
+// ── 예외 사전 ─────────────────────────────────────────────────────
+// 어절(공백·구두점으로 끊긴 한글 덩어리)이 사전 키와 정확히 일치하면 등록된 발음으로
+// 치환한다. 규칙 적용 전에 돌려, 치환된 발음이 그대로 규칙을 타도록 한다. (회의→회이→ヘイ)
+function applyDict(text) {
+  return text.replace(/[가-힣]+/g, (w) => WORD_OVERRIDES[w] ?? w);
+}
+
 // ── 메인 변환 ─────────────────────────────────────────────────────
 export function koreanToKatakana(text) {
-  let tokens = tokenize(text);
+  let tokens = tokenize(applyDict(text));
   tokens = applyEuiParticle(tokens);
   tokens = applyHWeakening(tokens);
   tokens = applyLiaison(tokens);
