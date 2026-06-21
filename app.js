@@ -195,5 +195,3 @@ kbdEl.addEventListener('mousedown', (e) => {
   else insertKana(b.dataset.k);
   kanaEl.focus();
 });
-
-regenerate();

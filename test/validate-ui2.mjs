@@ -12,8 +12,7 @@ await page.goto(base,{waitUntil:'load'});
 let fail=false; const check=(c,m)=>{console.log((c?'  OK  ':'  FAIL')+' '+m);if(!c)fail=true;};
 const kana=()=>page.$eval('#kana',e=>e.value);
 
-const k0=await kana(); console.log('초기 가나:',k0);
-check(/[ァ-ヶ]/.test(k0)&&!/[ぁ-ゖ]/.test(k0),'초기 = 가타카나로 채워짐');
+check((await kana())==='','초기 변환결과 칸은 비어 있음');
 
 // 가나 키보드: 토글 후 키를 누르면 가나 칸에 삽입
 check(await page.$eval('#kbd',e=>e.hidden),'키보드는 기본 접힘');
