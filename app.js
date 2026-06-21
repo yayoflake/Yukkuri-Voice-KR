@@ -2,6 +2,7 @@
 import { load } from './vendor/aquestalk.bundle.js';
 import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js?v=20260621';
 import { normalizeNumbers } from './numread.js?v=20260621';
+import { katakanaToKorean } from './k2h.js?v=20260622';
 
 const $ = (id) => document.getElementById(id);
 const textEl = $('text');
@@ -11,6 +12,7 @@ const speedVal = $('speedval');
 const playBtn = $('play');         // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
 const playKanaBtn = $('playkana'); // 아래쪽(고급): 가나 칸을 그대로 재생
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (아래쪽 재생의 기준)
+const kanaReadEl = $('kanaread');  // 가나 칸의 한국어 읽기 발음(보조 표기)
 const msgEl = $('msg');            // 위쪽 재생 버튼 밑 오류 메시지 (붉은글씨)
 const msgKanaEl = $('msgkana');    // 아래쪽 재생 버튼 밑 오류 메시지
 const autoSlashBtn = $('autoslash'); // 띄어쓰기 → 악센트구 / 자동 변환 토글 버튼
@@ -79,9 +81,15 @@ function koreanKana() {
   return koreanToKatakana(src, { autoSlash }).kana;
 }
 
+// 가나 칸의 한국어 읽기 발음을 보조 표기 칸에 갱신한다 (' / - 등 기호는 그대로 보존)
+function updateKanaRead() {
+  kanaReadEl.textContent = katakanaToKorean(kanaEl.value);
+}
+
 // 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 고급 편집의 출발점)
 function regenerate() {
   kanaEl.value = koreanKana();
+  updateKanaRead();
 }
 
 // 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
@@ -150,6 +158,8 @@ async function playKana(kana, btn) {
 }
 
 textEl.addEventListener('input', regenerate);
+// 가나 칸을 직접 고치면 한국어 읽기 보조 표기도 따라 갱신
+kanaEl.addEventListener('input', updateKanaRead);
 // 자동 / 토글 버튼: 켜고 끌 때마다 변환결과를 다시 만든다
 autoSlashBtn.addEventListener('click', () => {
   autoSlash = !autoSlash;
@@ -245,6 +255,7 @@ function insertKana(text) {
   const pos = s + text.length;
   caret = { s: pos, e: pos };
   kanaEl.setSelectionRange(pos, pos);
+  updateKanaRead();
 }
 // 커서 앞 한 글자 삭제 (선택 영역이 있으면 그 영역 삭제)
 function backspaceKana() {
@@ -255,6 +266,7 @@ function backspaceKana() {
   kanaEl.value = kanaEl.value.slice(0, s) + kanaEl.value.slice(e);
   caret = { s, e: s };
   kanaEl.setSelectionRange(s, s);
+  updateKanaRead();
 }
 
 function openKeyboard() { kbdEl.hidden = false; kbToggle.classList.add('active'); }
