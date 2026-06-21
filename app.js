@@ -37,7 +37,7 @@ function setError(btn, msg = '') {
 
 // 버튼의 평상시(idle) 라벨 — 위/아래가 다르다
 function idleLabel(btn) {
-  return btn === playKanaBtn ? '▶ 가나 재생' : '▶ 재생';
+  return '▶ 재생';
 }
 
 // 버튼 상태:  'idle' ▶재생 / 'loading' ⏳준비중 / 'playing' ■정지
