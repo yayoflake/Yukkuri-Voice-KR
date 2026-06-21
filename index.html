@@ -52,25 +52,19 @@
   .kb-toggle svg { display:block; }
   .kb-toggle:hover:not(:disabled) { background:#f0ebe0; }
   .kb-toggle.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .kbd { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .kb-wrap { position:relative; }
+  .kbd {
+    position:absolute; right:0; bottom:calc(100% + 8px); z-index:50;
+    width:min(300px,82vw); max-height:50vh; overflow:auto;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,.18); padding:10px;
+  }
   .kbd[hidden] { display:none; }
-  .kbd-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.35); }
-  .kbd-panel {
-    position:relative; width:100%; max-width:360px; max-height:90vh; overflow:auto;
-    background:var(--card); border:1px solid var(--line); border-radius:14px;
-    box-shadow:0 12px 40px rgba(0,0,0,.2); padding:14px;
-  }
-  .kbd-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:13px; font-weight:700; }
-  .kbd-close {
-    margin:0; width:auto; padding:4px 10px; font-size:14px;
-    background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:8px; transition:none;
-  }
-  .kbd-close:hover:not(:disabled) { background:#f0ebe0; }
-  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
-  .kbd-grid + .kbd-grid { margin-top:6px; padding-top:8px; border-top:1px dashed var(--line); }
+  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
+  .kbd-grid + .kbd-grid { margin-top:4px; padding-top:6px; border-top:1px dashed var(--line); }
   .kbd-grid button {
-    margin:0; width:100%; padding:9px 0; font-size:16px; font-weight:600;
-    background:#fff; color:var(--text); border:1px solid var(--line); border-radius:8px; transition:none;
+    margin:0; width:100%; padding:7px 0; font-size:14px; font-weight:600;
+    background:#fff; color:var(--text); border:1px solid var(--line); border-radius:7px; transition:none;
   }
   .kbd-grid button:hover:not(:disabled) { background:#f0ebe0; }
   .kbd-grid .spacer { visibility:hidden; }
@@ -119,17 +113,22 @@
     <div class="kana-wrap">
       <div class="kana-head">
         <label for="kana">변환결과</label>
-        <button type="button" id="kbtoggle" class="kb-toggle" aria-label="가나 키보드" title="가나 키보드">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="2" y="6" width="20" height="12" rx="2" />
-            <line x1="6" y1="10" x2="6" y2="10" />
-            <line x1="10" y1="10" x2="10" y2="10" />
-            <line x1="14" y1="10" x2="14" y2="10" />
-            <line x1="18" y1="10" x2="18" y2="10" />
-            <line x1="8" y1="14" x2="16" y2="14" />
-          </svg>
-        </button>
+        <div class="kb-wrap">
+          <button type="button" id="kbtoggle" class="kb-toggle" aria-label="가나 키보드" title="가나 키보드">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="6" width="20" height="12" rx="2" />
+              <line x1="6" y1="10" x2="6" y2="10" />
+              <line x1="10" y1="10" x2="10" y2="10" />
+              <line x1="14" y1="10" x2="14" y2="10" />
+              <line x1="18" y1="10" x2="18" y2="10" />
+              <line x1="8" y1="14" x2="16" y2="14" />
+            </svg>
+          </button>
+          <div class="kbd" id="kbd" hidden>
+            <div id="kbdbody"></div>
+          </div>
+        </div>
       </div>
       <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
       <p class="hint">
@@ -140,17 +139,6 @@
     </div>
 
     <div class="status" id="status"></div>
-  </div>
-
-  <div class="kbd" id="kbd" hidden>
-    <div class="kbd-backdrop" data-close></div>
-    <div class="kbd-panel" role="dialog" aria-label="가나 키보드">
-      <div class="kbd-head">
-        <span>가나 키보드</span>
-        <button type="button" class="kbd-close" data-close aria-label="닫기">✕</button>
-      </div>
-      <div id="kbdbody"></div>
-    </div>
   </div>
 
   <script type="module" src="./app.js"></script>
