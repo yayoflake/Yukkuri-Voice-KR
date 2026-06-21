@@ -337,7 +337,9 @@ function applyDict(text) {
 }
 
 // ── 메인 변환 ─────────────────────────────────────────────────────
-export function koreanToKatakana(text) {
+// opts.autoSlash: 띄어쓰기를 악센트구 구분자 / 로 자동 반영할지 (기본 true).
+//   끄면 띄어쓰기에서 / 를 넣지 않는다(사용자가 직접 친 / 는 항상 보존).
+export function koreanToKatakana(text, { autoSlash = true } = {}) {
   let tokens = tokenize(applyDict(text));
   tokens = applyEuiParticle(tokens);
   tokens = applyHWeakening(tokens);
@@ -350,9 +352,9 @@ export function koreanToKatakana(text) {
     const t = tokens[i];
     if (t.type === 'sep' || t.type === 'raw') { out.push(t.kana); continue; }
 
-    // 악센트구 경계: 앞이 음절이면 / 를 넣는다 (문두·쉼 뒤면 생략)
+    // 악센트구 경계: 앞이 음절이면 / 를 넣는다 (문두·쉼 뒤면 생략). autoSlash=false면 생략.
     const prev = tokens[i - 1];
-    if (t.boundaryBefore && prev && prev.type === 'syl') out.push('/');
+    if (autoSlash && t.boundaryBefore && prev && prev.type === 'syl') out.push('/');
 
     // 유성음화 판정: 바로 앞이 음절이고, 그 코다가 모음/비음/유음이면 유성
     // (어절 경계를 넘어서도 유지 — 전 가요 → ジョンガヨ)

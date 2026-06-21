@@ -10,7 +10,8 @@ const speedEl = $('speed');
 const speedVal = $('speedval');
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
-const statusEl = $('status');
+const msgEl = $('msg');            // 재생 버튼 밑 오류 메시지 (붉은글씨)
+const autoSlashBtn = $('autoslash'); // 띄어쓰기 → 악센트구 / 자동 변환 토글
 const kbToggle = $('kbtoggle');    // 가나 키보드 열기
 const kbdEl = $('kbd');            // 가나 키보드 팝오버
 const kbdTabs = $('kbdtabs');      // 탭(청음/탁음/작은가나)
@@ -25,9 +26,10 @@ let busy = false;          // 로드/합성 중 (이때 버튼은 잠금)
 let currentAudio = null;   // 재생 중인 Audio (있으면 = 재생 중)
 let lastUrl = null;
 
-function setStatus(msg, isErr = false) {
-  statusEl.textContent = msg;
-  statusEl.classList.toggle('err', isErr);
+// 재생창 밑 메시지: 오류만 붉은글씨로 표시. 인자 없이 호출하면 지운다.
+// (재생중/재생완료 같은 상태는 재생 버튼의 표시가 대신하므로 메시지로 띄우지 않는다)
+function setError(msg = '') {
+  msgEl.textContent = msg;
 }
 
 // 버튼 상태:  'idle' ▶재생 / 'loading' ⏳준비중 / 'playing' ■정지
@@ -49,9 +51,12 @@ function stopPlayback() {
   if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
 }
 
+// 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
+let autoSlash = true;
+
 // 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (가타카나)
 function regenerate() {
-  const { kana } = koreanToKatakana(normalizeNumbers(textEl.value));
+  const { kana } = koreanToKatakana(normalizeNumbers(textEl.value), { autoSlash });
   kanaEl.value = kana;
 }
 
@@ -62,7 +67,6 @@ async function ensureVoice(voice) {
     const old = current; current = null;
     try { await old.aq.destroy(); } catch { /* 무시 */ }
   }
-  setStatus('음성 엔진 로딩 중… (최초 1회, 수십 초 소요)');
   const aq = await load(voice, { baseUrl: VOICES_BASE });
   current = { voice, aq };
   return aq;
@@ -71,13 +75,14 @@ async function ensureVoice(voice) {
 // 버튼 클릭: 준비/합성 중이면 무시, 재생 중이면 정지, 그 외엔 새로 재생
 async function onPlayClick() {
   if (busy) return;
-  if (currentAudio) { stopPlayback(); setStatus('정지됨'); setPlayUI('idle'); return; }
+  if (currentAudio) { stopPlayback(); setPlayUI('idle'); return; }
 
   // 재생 기준은 (편집 가능한) 가나 칸. 히라가나가 섞여 있어도 합성용으로 가타카나로 정규화하고,
   // 운율 보조 표기(악센트핵 ' / 하이픈→장음 ー)도 AquesTalk1이 받는 형태로 정리한다.
   const kana = normalizeProsody(hiraToKata(kanaEl.value)).trim();
-  if (!kana) { setStatus('가나가 비어 있음', true); return; }
+  if (!kana) { setError('가나가 비어 있음'); return; }
 
+  setError(); // 이전 오류 메시지 지우기
   busy = true;
   setPlayUI('loading');
 
@@ -85,13 +90,12 @@ async function onPlayClick() {
   let wav;
   try {
     const aq = await ensureVoice(voiceEl.value);
-    setStatus('합성 중…');
     await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
     wav = aq.run(kana, Number(speedEl.value));
   } catch (e) {
     console.error(e);
     busy = false;
-    setStatus('오류: ' + (e?.message || e), true);
+    setError('오류: ' + (e?.message || e));
     setPlayUI('idle');
     return;
   }
@@ -102,20 +106,26 @@ async function onPlayClick() {
   lastUrl = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
   const audio = new Audio(lastUrl);
   currentAudio = audio;
-  audio.onended = () => { stopPlayback(); setStatus('재생 완료'); setPlayUI('idle'); };
+  audio.onended = () => { stopPlayback(); setPlayUI('idle'); };
   setPlayUI('playing');
-  setStatus('재생 중');
   audio.play().catch((e) => {
     // 정지(stopPlayback)로 인한 중단(AbortError)은 정상이므로 무시
     if (e && e.name === 'AbortError') return;
     console.error(e);
     stopPlayback();
-    setStatus('재생 오류: ' + (e?.message || e), true);
+    setError('재생 오류: ' + (e?.message || e));
     setPlayUI('idle');
   });
 }
 
 textEl.addEventListener('input', regenerate);
+// 자동 / 토글: 켜고 끌 때마다 변환결과를 다시 만든다
+autoSlashBtn.addEventListener('click', () => {
+  autoSlash = !autoSlash;
+  autoSlashBtn.classList.toggle('active', autoSlash);
+  autoSlashBtn.setAttribute('aria-pressed', String(autoSlash));
+  regenerate();
+});
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 playBtn.addEventListener('click', onPlayClick);
 // 음성을 바꾸면 재생 중인 소리는 멈춤
