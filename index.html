@@ -14,12 +14,14 @@
     font-family:"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
     padding:24px;
   }
+  .app { width:100%; max-width:560px; display:flex; flex-direction:column; gap:18px; }
+  .head { text-align:center; }
   .card {
-    width:100%; max-width:560px; background:var(--card); border:1px solid var(--line);
-    border-radius:16px; padding:28px 26px; box-shadow:0 8px 30px rgba(0,0,0,.06);
+    background:var(--card); border:1px solid var(--line);
+    border-radius:16px; padding:24px 26px; box-shadow:0 8px 30px rgba(0,0,0,.06);
   }
   h1 { margin:0 0 4px; font-size:22px; }
-  .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+  .sub { margin:0; color:var(--muted); font-size:13px; }
   label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
   textarea {
     width:100%; min-height:96px; resize:vertical; padding:12px 14px; font-size:16px;
@@ -42,7 +44,6 @@
   }
   button:hover:not(:disabled) { background:var(--accent2); }
   button:disabled { opacity:.55; cursor:default; }
-  .step + .step { margin-top:24px; padding-top:24px; border-top:1px solid var(--line); }
   .options { margin-top:6px; }
   textarea.kana {
     width:100%; min-height:64px; resize:vertical;
@@ -57,17 +58,19 @@
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>윳쿠리 보이스 🗣️</h1>
-    <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
+  <main class="app">
+    <div class="head">
+      <h1>윳쿠리 보이스 🗣️</h1>
+      <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
+    </div>
 
-    <section class="step">
+    <section class="card">
       <label for="text">읽을 한국어</label>
       <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
       <button id="convert">변환</button>
     </section>
 
-    <section class="step">
+    <section class="card">
       <label for="kana">변환결과</label>
       <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
       <p class="hint">
@@ -100,10 +103,9 @@
       </div>
 
       <button id="play">▶ 재생</button>
+      <div class="status" id="status"></div>
     </section>
-
-    <div class="status" id="status"></div>
-  </div>
+  </main>
 
   <script type="module" src="./app.js"></script>
 </body>
