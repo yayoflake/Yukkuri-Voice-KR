@@ -1,7 +1,7 @@
 // app.js — UI 글루: 한국어 → 가타카나 변환 후 AquesTalk1로 합성/재생
 import { load } from './vendor/aquestalk.bundle.js';
-import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js';
-import { normalizeNumbers } from './numread.js';
+import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js?v=20260621';
+import { normalizeNumbers } from './numread.js?v=20260621';
 
 const $ = (id) => document.getElementById(id);
 const textEl = $('text');
