@@ -8,9 +8,11 @@ const textEl = $('text');
 const voiceEl = $('voice');
 const speedEl = $('speed');
 const speedVal = $('speedval');
-const playBtn = $('play');
-const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
-const msgEl = $('msg');            // 재생 버튼 밑 오류 메시지 (붉은글씨)
+const playBtn = $('play');         // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
+const playKanaBtn = $('playkana'); // 아래쪽(고급): 가나 칸을 그대로 재생
+const kanaEl = $('kana');          // 편집 가능한 가나 칸 (아래쪽 재생의 기준)
+const msgEl = $('msg');            // 위쪽 재생 버튼 밑 오류 메시지 (붉은글씨)
+const msgKanaEl = $('msgkana');    // 아래쪽 재생 버튼 밑 오류 메시지
 const autoSlashBtn = $('autoslash'); // 띄어쓰기 → 악센트구 / 자동 변환 토글 버튼
 const kbToggle = $('kbtoggle');    // 가나 키보드 열기
 const kbdEl = $('kbd');            // 가나 키보드 팝오버
@@ -25,19 +27,32 @@ let current = null;        // { voice, aq }
 let busy = false;          // 로드/합성 중 (이때 버튼은 잠금)
 let currentAudio = null;   // 재생 중인 Audio (있으면 = 재생 중)
 let lastUrl = null;
+let activeBtn = null;      // 재생/준비 UI를 표시 중인 버튼 (위/아래)
 
-// 재생창 밑 메시지: 오류만 붉은글씨로 표시. 인자 없이 호출하면 지운다.
+// 재생창 밑 메시지: 오류만 붉은글씨로 표시. btn에 따라 위/아래 메시지 칸을 고른다.
 // (재생중/재생완료 같은 상태는 재생 버튼의 표시가 대신하므로 메시지로 띄우지 않는다)
-function setError(msg = '') {
-  msgEl.textContent = msg;
+function setError(btn, msg = '') {
+  (btn === playKanaBtn ? msgKanaEl : msgEl).textContent = msg;
+}
+
+// 버튼의 평상시(idle) 라벨 — 위/아래가 다르다
+function idleLabel(btn) {
+  return btn === playKanaBtn ? '▶ 가나 재생' : '▶ 재생';
 }
 
 // 버튼 상태:  'idle' ▶재생 / 'loading' ⏳준비중 / 'playing' ■정지
-function setPlayUI(mode) {
-  playBtn.disabled = (mode === 'loading');
-  playBtn.textContent =
+function setPlayUI(btn, mode) {
+  btn.disabled = (mode === 'loading');
+  btn.textContent =
     mode === 'loading' ? '⏳ 준비 중…' :
-    mode === 'playing' ? '■ 정지' : '▶ 재생';
+    mode === 'playing' ? '■ 정지' : idleLabel(btn);
+}
+
+// 두 버튼을 모두 idle로 되돌린다 (재생 종료/중지/오류 시)
+function resetPlayUI() {
+  setPlayUI(playBtn, 'idle');
+  setPlayUI(playKanaBtn, 'idle');
+  activeBtn = null;
 }
 
 // 재생 중지 + 리소스 정리
@@ -54,10 +69,19 @@ function stopPlayback() {
 // 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
 let autoSlash = true;
 
-// 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (가타카나)
+// 한국어 칸에 직접 친 운율 기호(악센트핵 ' 류, 악센트구 / )는 단순 재생에서 무시한다.
+// 커스텀 운율(' / -)은 아래쪽 가나 칸에서만 다룬다.
+const KO_MARKS_RE = /['‘’ʹ´`/／]/g;
+
+// 한국어 칸 → 가타카나 (직접 친 운율 기호는 제거하고 단순 변환)
+function koreanKana() {
+  const src = normalizeNumbers(textEl.value.replace(KO_MARKS_RE, ''));
+  return koreanToKatakana(src, { autoSlash }).kana;
+}
+
+// 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 고급 편집의 출발점)
 function regenerate() {
-  const { kana } = koreanToKatakana(normalizeNumbers(textEl.value), { autoSlash });
-  kanaEl.value = kana;
+  kanaEl.value = koreanKana();
 }
 
 // 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
@@ -72,19 +96,26 @@ async function ensureVoice(voice) {
   return aq;
 }
 
-// 버튼 클릭: 준비/합성 중이면 무시, 재생 중이면 정지, 그 외엔 새로 재생
-async function onPlayClick() {
+// 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
+// 준비/합성 중이면 무시, 재생 중인 같은 버튼을 다시 누르면 정지, 다른 버튼이면 멈추고 새로 재생.
+async function playKana(kana, btn) {
   if (busy) return;
-  if (currentAudio) { stopPlayback(); setPlayUI('idle'); return; }
+  if (currentAudio) {
+    const wasActive = activeBtn === btn;
+    stopPlayback();
+    resetPlayUI();
+    if (wasActive) return;
+  }
 
-  // 재생 기준은 (편집 가능한) 가나 칸. 히라가나가 섞여 있어도 합성용으로 가타카나로 정규화하고,
-  // 운율 보조 표기(악센트핵 ' / 하이픈→장음 ー)도 AquesTalk1이 받는 형태로 정리한다.
-  const kana = normalizeProsody(hiraToKata(kanaEl.value)).trim();
-  if (!kana) { setError('가나가 비어 있음'); return; }
+  // 합성용으로 가타카나로 정규화하고, 운율 보조 표기(' / 하이픈→장음 ー)도
+  // AquesTalk1이 받는 형태로 정리한다.
+  kana = normalizeProsody(hiraToKata(kana)).trim();
+  if (!kana) { setError(btn, '가나가 비어 있음'); return; }
 
-  setError(); // 이전 오류 메시지 지우기
+  setError(btn); // 이전 오류 메시지 지우기
   busy = true;
-  setPlayUI('loading');
+  activeBtn = btn;
+  setPlayUI(btn, 'loading');
 
   // 1) 음성 로드 + 합성 (실제 실패가 날 수 있는 구간)
   let wav;
@@ -95,8 +126,8 @@ async function onPlayClick() {
   } catch (e) {
     console.error(e);
     busy = false;
-    setError('오류: ' + (e?.message || e));
-    setPlayUI('idle');
+    setError(btn, '오류: ' + (e?.message || e));
+    resetPlayUI();
     return;
   }
   busy = false;
@@ -106,15 +137,15 @@ async function onPlayClick() {
   lastUrl = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
   const audio = new Audio(lastUrl);
   currentAudio = audio;
-  audio.onended = () => { stopPlayback(); setPlayUI('idle'); };
-  setPlayUI('playing');
+  audio.onended = () => { stopPlayback(); resetPlayUI(); };
+  setPlayUI(btn, 'playing');
   audio.play().catch((e) => {
     // 정지(stopPlayback)로 인한 중단(AbortError)은 정상이므로 무시
     if (e && e.name === 'AbortError') return;
     console.error(e);
     stopPlayback();
-    setError('재생 오류: ' + (e?.message || e));
-    setPlayUI('idle');
+    setError(btn, '재생 오류: ' + (e?.message || e));
+    resetPlayUI();
   });
 }
 
@@ -127,9 +158,12 @@ autoSlashBtn.addEventListener('click', () => {
   regenerate();
 });
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
-playBtn.addEventListener('click', onPlayClick);
+// 위쪽(라이트): 한국어 칸을 단순 변환해 재생
+playBtn.addEventListener('click', () => playKana(koreanKana(), playBtn));
+// 아래쪽(고급): 가나 칸을 그대로(직접 넣은 ' / 포함) 재생
+playKanaBtn.addEventListener('click', () => playKana(kanaEl.value, playKanaBtn));
 // 음성을 바꾸면 재생 중인 소리는 멈춤
-voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); setPlayUI('idle'); } });
+voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); resetPlayUI(); } });
 
 // ── 가나 키보드 ───────────────────────────────────────────────────
 // 청음/탁음·반탁음/작은가나·기호를 탭으로 나눠 한 화면당 키 수를 줄이고 키를 키운다.
