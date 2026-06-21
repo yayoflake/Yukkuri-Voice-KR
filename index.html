@@ -42,7 +42,7 @@
   }
   button:hover:not(:disabled) { background:var(--accent2); }
   button:disabled { opacity:.55; cursor:default; }
-  .kana-wrap { margin-top:24px; }
+  .step + .step { margin-top:24px; padding-top:24px; border-top:1px solid var(--line); }
   .options { margin-top:6px; }
   textarea.kana {
     width:100%; min-height:64px; resize:vertical;
@@ -61,12 +61,13 @@
     <h1>윳쿠리 보이스 🗣️</h1>
     <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
 
-    <label for="text">읽을 한국어</label>
-    <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
+    <section class="step">
+      <label for="text">읽을 한국어</label>
+      <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
+      <button id="convert">변환</button>
+    </section>
 
-    <button id="convert">변환</button>
-
-    <div class="kana-wrap">
+    <section class="step">
       <label for="kana">변환결과</label>
       <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
       <p class="hint">
@@ -74,8 +75,6 @@
         억양: 음 내려가는 자리에 <code>'</code> &nbsp;·&nbsp; 장음(길게): <code>-</code> 또는 <code>ー</code><br>
         예) <code>안녕'하세요</code>, <code>아-</code>
       </p>
-
-      <button id="play">▶ 재생</button>
 
       <div class="options">
         <label>재생 옵션</label>
@@ -99,7 +98,9 @@
           </div>
         </div>
       </div>
-    </div>
+
+      <button id="play">▶ 재생</button>
+    </section>
 
     <div class="status" id="status"></div>
   </div>
