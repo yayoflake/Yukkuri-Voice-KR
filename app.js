@@ -1,6 +1,6 @@
 // app.js — UI 글루: 한국어 → 가타카나 변환 후 AquesTalk1로 합성/재생
 import { load } from './vendor/aquestalk.bundle.js';
-import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js';
+import { koreanToKatakana, kataToHira, hiraToKata, normalizeProsody } from './k2k.js';
 import { normalizeNumbers } from './numread.js';
 
 const $ = (id) => document.getElementById(id);
@@ -8,10 +8,12 @@ const textEl = $('text');
 const voiceEl = $('voice');
 const speedEl = $('speed');
 const speedVal = $('speedval');
-const convertBtn = $('convert');   // 한국어 → 가나 변환 트리거
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const statusEl = $('status');
+const scriptEl = $('script');      // 가타카나/히라가나 토글
+
+let script = 'kata';               // 현재 표기: 'kata' | 'hira'
 
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
@@ -46,10 +48,10 @@ function stopPlayback() {
   if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
 }
 
-// 변환 버튼: 한국어를 가타카나로 변환해 가나 칸을 채운다
+// 한국어 입력이 바뀌면 가나 칸을 (현재 표기로) 새로 채운다
 function regenerate() {
   const { kana } = koreanToKatakana(normalizeNumbers(textEl.value));
-  kanaEl.value = kana;
+  kanaEl.value = script === 'hira' ? kataToHira(kana) : kana;
 }
 
 // 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
@@ -112,8 +114,21 @@ async function onPlayClick() {
   });
 }
 
-convertBtn.addEventListener('click', regenerate);
+textEl.addEventListener('input', regenerate);
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 playBtn.addEventListener('click', onPlayClick);
 // 음성을 바꾸면 재생 중인 소리는 멈춤
 voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); setPlayUI('idle'); } });
+
+// 표기 토글: 현재 칸 내용을 보존한 채 가타카나 ↔ 히라가나로 변환
+scriptEl.addEventListener('click', (e) => {
+  const target = e.target.closest('button[data-script]');
+  if (!target) return;
+  const next = target.dataset.script;
+  if (next === script) return;
+  script = next;
+  for (const b of scriptEl.querySelectorAll('button')) b.classList.toggle('active', b.dataset.script === script);
+  kanaEl.value = script === 'hira' ? kataToHira(kanaEl.value) : hiraToKata(kanaEl.value);
+});
+
+regenerate();

@@ -39,7 +39,6 @@ const check = (cond, msg) => { console.log((cond ? '  OK  ' : '  FAIL') + ' ' + 
 console.log('초기 버튼:', await btn());
 check((await btn()) === '▶ 재생', '초기 상태 = ▶ 재생');
 await page.type('#text', '안녕하세요');
-await page.click('#convert');   // 한국어 → 가나 변환 (재생 전 필수)
 
 await page.click('#play');
 await waitBtn('⏳ 준비 중…', 5000);
