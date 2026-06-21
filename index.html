@@ -45,12 +45,7 @@
   .kana-wrap { margin-top:24px; }
   .kana-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .kana-head label { margin:0; }
-  .opt {
-    display:flex; align-items:center; gap:7px; margin:8px 2px 0;
-    font-size:13px; font-weight:400; color:var(--muted); cursor:pointer;
-  }
-  .opt input { width:auto; accent-color:var(--accent); cursor:pointer; }
-  .opt code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
+  #autoslash { margin-top:8px; font-size:12px; font-weight:600; }
   .kb-toggle {
     margin:0; width:auto; padding:6px 9px; display:inline-flex; align-items:center;
     border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--muted); transition:none;
@@ -100,10 +95,8 @@
 
     <label for="text">읽을 한국어</label>
     <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
-    <label class="opt" title="띄어쓰기를 악센트구 구분자 / 로 자동 변환">
-      <input type="checkbox" id="autoslash" checked />
-      띄어쓰기를 악센트구(<code>/</code>)로 끊어 읽기
-    </label>
+    <button type="button" id="autoslash" class="kb-toggle active"
+            aria-pressed="true" title="띄어쓰기를 악센트구 구분자 / 로 자동 변환">자동 /</button>
 
     <div class="row">
       <div>

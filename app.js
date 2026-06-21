@@ -11,7 +11,7 @@ const speedVal = $('speedval');
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const msgEl = $('msg');            // 재생 버튼 밑 오류 메시지 (붉은글씨)
-const autoSlashEl = $('autoslash'); // 띄어쓰기 → 악센트구 / 자동 변환 체크박스
+const autoSlashBtn = $('autoslash'); // 띄어쓰기 → 악센트구 / 자동 변환 토글 버튼
 const kbToggle = $('kbtoggle');    // 가나 키보드 열기
 const kbdEl = $('kbd');            // 가나 키보드 팝오버
 const kbdTabs = $('kbdtabs');      // 탭(청음/탁음/작은가나)
@@ -51,10 +51,12 @@ function stopPlayback() {
   if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
 }
 
+// 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
+let autoSlash = true;
+
 // 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (가타카나)
-// 자동 / 체크박스 상태에 따라 띄어쓰기를 악센트구 구분자 / 로 반영할지 결정한다.
 function regenerate() {
-  const { kana } = koreanToKatakana(normalizeNumbers(textEl.value), { autoSlash: autoSlashEl.checked });
+  const { kana } = koreanToKatakana(normalizeNumbers(textEl.value), { autoSlash });
   kanaEl.value = kana;
 }
 
@@ -117,8 +119,13 @@ async function onPlayClick() {
 }
 
 textEl.addEventListener('input', regenerate);
-// 자동 / 체크박스: 바뀔 때마다 변환결과를 다시 만든다
-autoSlashEl.addEventListener('change', regenerate);
+// 자동 / 토글 버튼: 켜고 끌 때마다 변환결과를 다시 만든다
+autoSlashBtn.addEventListener('click', () => {
+  autoSlash = !autoSlash;
+  autoSlashBtn.classList.toggle('active', autoSlash);
+  autoSlashBtn.setAttribute('aria-pressed', String(autoSlash));
+  regenerate();
+});
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 playBtn.addEventListener('click', onPlayClick);
 // 음성을 바꾸면 재생 중인 소리는 멈춤
