@@ -131,5 +131,3 @@ scriptEl.addEventListener('click', (e) => {
   for (const b of scriptEl.querySelectorAll('button')) b.classList.toggle('active', b.dataset.script === script);
   kanaEl.value = script === 'hira' ? kataToHira(kanaEl.value) : hiraToKata(kanaEl.value);
 });
-
-regenerate();
