@@ -26,7 +26,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
 page.on('console', (m) => console.log('  [page]', m.text()));
-const status = () => page.$eval('#status', (e) => e.textContent.trim());
+const status = () => page.$eval('#msg', (e) => e.textContent.trim());
 
 await page.goto(base, { waitUntil: 'load' });
 const btn = () => page.$eval('#play', (b) => b.textContent.trim());
