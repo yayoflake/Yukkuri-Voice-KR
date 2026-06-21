@@ -366,7 +366,8 @@ export function koreanToKatakana(text) {
   kana = kana.replace(/\/?([、。])\/?/g, '$1');               // 쉼표·마침표(쉼) 옆의 / 는 잉여 → 제거
   kana = kana.replace(/[、。]+/g, (m) => (m.includes('。') ? '。' : '、'));
   kana = kana.replace(/\/{2,}/g, '/');                        // 연속 악센트구 구분자 → 하나
-  kana = kana.replace(/^[、。\/]+|[、。\/]+$/g, '');            // 양 끝의 구분자 제거
+  kana = kana.replace(/^[、。\/]+/, '').replace(/\/+$/, '');   // 앞쪽 잉여 구분자·끝의 악센트구 / 제거
+                                                              // (사용자가 명시한 끝의 。/、 는 보존)
   return { kana };
 }
 
