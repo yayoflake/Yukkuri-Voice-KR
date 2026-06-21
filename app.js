@@ -163,8 +163,6 @@ function buildKeyboard() {
 
     const grid = document.createElement('div');
     grid.className = 'kbd-grid';
-    // 청음·탁음 탭은 가나표를 전치해 세로 5행(모음)으로 납작하게. 작은가나·기호 탭은 행 그대로.
-    if (i !== 2) grid.classList.add('cols');
     grid.hidden = i !== 0;
     for (const row of rows) for (const ch of row) {
       if (ch === '') { const s = document.createElement('span'); s.className = 'spacer'; grid.appendChild(s); continue; }
