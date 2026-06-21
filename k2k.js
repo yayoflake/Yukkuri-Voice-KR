@@ -151,10 +151,18 @@ function tokenize(text) {
       lastSyl = tok;
     } else if (ACCENT_MARKS.includes(ch)) {
       // 악센트핵: 바로 앞 음절 뒤에 ' 를 단다. 발음 규칙에는 영향을 주지 않는다.
+      // 앞 음절이 없으면(문두·구두점 뒤 등) raw 토큰으로 그대로 흘려보내 누락을 막는다.
       if (lastSyl) lastSyl.suffix += "'";
+      else tokens.push({ type: 'raw', kana: "'" });
     } else if (LONG_MARKS.includes(ch)) {
       // 장음: 하이픈을 앞 음절의 장음 기호 ー 로. (아- → アー).  발음 규칙엔 영향 없음.
       if (lastSyl) lastSyl.suffix += 'ー';
+      else tokens.push({ type: 'raw', kana: 'ー' });
+    } else if (ch === '/' || ch === '／') {
+      // 사용자가 직접 친 악센트구 구분자 / 는 그대로 출력한다(입력 1:1 보존).
+      tokens.push({ type: 'raw', kana: '/' });
+      lastSyl = null;
+      pendingBoundary = false;
     } else if (ch === '\n' || ch === '\r') {
       // 줄바꿈: 문장 끝으로 보고 쉼(。)
       tokens.push({ type: 'sep', kana: '。' });
@@ -340,7 +348,7 @@ export function koreanToKatakana(text) {
   const out = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t.type === 'sep') { out.push(t.kana); continue; }
+    if (t.type === 'sep' || t.type === 'raw') { out.push(t.kana); continue; }
 
     // 악센트구 경계: 앞이 음절이면 / 를 넣는다 (문두·쉼 뒤면 생략)
     const prev = tokens[i - 1];
@@ -360,14 +368,9 @@ export function koreanToKatakana(text) {
     out.push(buildMora(row, glide, base) + codaKana(t.coda, nextCho) + t.suffix);
   }
 
-  // 구분자 정리
-  let kana = out.join('');
-  kana = kana.replace(/\/?([、。])\/?/g, '$1');               // 쉼표·마침표(쉼) 옆의 / 는 잉여 → 제거
-  kana = kana.replace(/[、。]+/g, (m) => (m.includes('。') ? '。' : '、'));
-  kana = kana.replace(/\/{2,}/g, '/');                        // 연속 악센트구 구분자 → 하나
-  kana = kana.replace(/^[、。\/]+/, '').replace(/\/+$/, '');   // 앞쪽 잉여 구분자·끝의 악센트구 / 제거
-                                                              // (사용자가 명시한 끝의 。/、 는 보존)
-  return { kana };
+  // 후처리 없음: 문장부호·운율기호(。、 / ' ー)는 사용자가 친 그대로 1:1로 내보낸다.
+  // (자동 생성되는 악센트구 / 는 항상 음절과 음절 사이에만 생기므로 합치거나 지울 필요가 없다.)
+  return { kana: out.join('') };
 }
 
 // ── 운율 보조 표기 정규화 (악센트핵 · 장음) ───────────────────────
