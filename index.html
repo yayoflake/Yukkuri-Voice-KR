@@ -47,21 +47,19 @@
   .kana-head label { margin:0; }
   .switch {
     margin-top:8px; width:auto; display:inline-flex; align-items:center; gap:8px;
-    padding:5px 12px 5px 7px; font-size:12px; font-weight:600;
-    color:var(--muted); background:#fff; border:1px solid var(--line);
-    border-radius:20px; transition:color .15s, border-color .15s;
+    padding:0; font-size:13px; font-weight:600; color:var(--muted);
+    background:none; border:none; transition:color .15s;
   }
   .switch .track {
-    position:relative; width:34px; height:18px; flex:none;
-    background:#cfc8ba; border-radius:9px; transition:background .15s;
+    position:relative; width:36px; height:20px; flex:none;
+    background:#cfc8ba; border-radius:10px; transition:background .15s;
   }
   .switch .knob {
-    position:absolute; top:2px; left:2px; width:14px; height:14px;
+    position:absolute; top:2px; left:2px; width:16px; height:16px;
     background:#fff; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.3);
     transition:left .15s;
   }
-  .switch:hover:not(:disabled) { background:#faf7ef; }
-  .switch.active { color:var(--accent2); border-color:var(--accent); background:#fff; }
+  .switch.active { color:var(--accent2); }
   .switch.active .track { background:var(--accent); }
   .switch.active .knob { left:18px; }
   .kb-toggle {
