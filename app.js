@@ -217,11 +217,7 @@ function openKeyboard() { kbdEl.hidden = false; kbToggle.classList.add('active')
 function closeKeyboard() { kbdEl.hidden = true; kbToggle.classList.remove('active'); }
 
 kbToggle.addEventListener('click', () => (kbdEl.hidden ? openKeyboard() : closeKeyboard()));
-// 바깥 클릭 / Esc 로 닫기
-document.addEventListener('mousedown', (e) => {
-  if (kbdEl.hidden || kbdEl.contains(e.target) || kbToggle.contains(e.target)) return;
-  closeKeyboard();
-});
+// Esc 로만 닫기 (바깥 클릭으로는 닫지 않음)
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !kbdEl.hidden) closeKeyboard(); });
 
 // mousedown에서 처리(+preventDefault)해 모달 클릭이 가나 칸 선택을 흐트러뜨리지 않게

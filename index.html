@@ -55,12 +55,15 @@
   .kb-wrap { position:relative; }
   .kbd {
     position:absolute; right:0; bottom:calc(100% + 6px); z-index:50;
-    width:min(214px,76vw); max-height:190px; overflow:auto;
+    width:min(296px,92vw); max-height:190px; overflow:auto;
     background:var(--card); border:1px solid var(--line); border-radius:10px;
     box-shadow:0 6px 18px rgba(0,0,0,.16); padding:6px;
   }
   .kbd[hidden] { display:none; }
-  .kbd-tabs { display:flex; gap:3px; margin-bottom:5px; position:sticky; top:0; }
+  .kbd-tabs {
+    display:flex; gap:3px; position:sticky; top:0; z-index:1;
+    background:var(--card); padding:6px 6px 5px; margin:-6px -6px 5px; border-bottom:1px solid var(--line);
+  }
   .kbd-tabs button {
     margin:0; flex:1; padding:3px 0; font-size:10px; font-weight:600;
     background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:5px; transition:none;
