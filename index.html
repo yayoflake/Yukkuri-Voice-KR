@@ -52,16 +52,28 @@
   .kb-toggle svg { display:block; }
   .kb-toggle:hover:not(:disabled) { background:#f0ebe0; }
   .kb-toggle.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .kbd { margin-top:10px; border:1px solid var(--line); border-radius:10px; padding:10px; background:#faf7ef; }
+  .kbd { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; }
   .kbd[hidden] { display:none; }
+  .kbd-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.35); }
+  .kbd-panel {
+    position:relative; width:100%; max-width:360px; max-height:90vh; overflow:auto;
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 12px 40px rgba(0,0,0,.2); padding:14px;
+  }
+  .kbd-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:13px; font-weight:700; }
+  .kbd-close {
+    margin:0; width:auto; padding:4px 10px; font-size:14px;
+    background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:8px; transition:none;
+  }
+  .kbd-close:hover:not(:disabled) { background:#f0ebe0; }
   .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
   .kbd-grid + .kbd-grid { margin-top:6px; padding-top:8px; border-top:1px dashed var(--line); }
-  .kbd button {
+  .kbd-grid button {
     margin:0; width:100%; padding:9px 0; font-size:16px; font-weight:600;
     background:#fff; color:var(--text); border:1px solid var(--line); border-radius:8px; transition:none;
   }
-  .kbd button:hover:not(:disabled) { background:#f0ebe0; }
-  .kbd .spacer { visibility:hidden; }
+  .kbd-grid button:hover:not(:disabled) { background:#f0ebe0; }
+  .kbd-grid .spacer { visibility:hidden; }
   textarea.kana {
     width:100%; min-height:64px; resize:vertical;
     padding:12px 14px; border:1px dashed var(--line); border-radius:10px;
@@ -120,7 +132,6 @@
         </button>
       </div>
       <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
-      <div class="kbd" id="kbd" hidden></div>
       <p class="hint">
         한국어 입력칸·가나 칸 어디든 직접 입력 —
         억양: 음 내려가는 자리에 <code>'</code> &nbsp;·&nbsp; 장음(길게): <code>-</code> 또는 <code>ー</code><br>
@@ -129,6 +140,17 @@
     </div>
 
     <div class="status" id="status"></div>
+  </div>
+
+  <div class="kbd" id="kbd" hidden>
+    <div class="kbd-backdrop" data-close></div>
+    <div class="kbd-panel" role="dialog" aria-label="가나 키보드">
+      <div class="kbd-head">
+        <span>가나 키보드</span>
+        <button type="button" class="kbd-close" data-close aria-label="닫기">✕</button>
+      </div>
+      <div id="kbdbody"></div>
+    </div>
   </div>
 
   <script type="module" src="./app.js"></script>

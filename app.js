@@ -11,8 +11,9 @@ const speedVal = $('speedval');
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const statusEl = $('status');
-const kbToggle = $('kbtoggle');    // 가나 키보드 펼치기/접기
-const kbdEl = $('kbd');            // 가나 키보드 패널
+const kbToggle = $('kbtoggle');    // 가나 키보드 열기
+const kbdEl = $('kbd');            // 가나 키보드 모달(팝업)
+const kbdBody = $('kbdbody');      // 키 그리드가 들어갈 영역
 
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
@@ -158,40 +159,53 @@ function buildKeyboard() {
       b.dataset.k = ch;
       grid.appendChild(b);
     }
-    kbdEl.appendChild(grid);
+    kbdBody.appendChild(grid);
   }
 }
 buildKeyboard();
 
-// 커서 위치에 문자열 삽입 (선택 영역이 있으면 대체)
+// 가나 칸의 커서 위치를 기억해 둔다(모달이 열리면 포커스가 칸을 벗어나므로).
+let caret = null; // { s, e }
+const rememberCaret = () => { caret = { s: kanaEl.selectionStart, e: kanaEl.selectionEnd }; };
+for (const ev of ['keyup', 'click', 'select', 'focus', 'input']) kanaEl.addEventListener(ev, rememberCaret);
+
+// 기억한 커서 위치에 문자열 삽입 (선택 영역이 있으면 대체)
 function insertKana(text) {
-  const s = kanaEl.selectionStart ?? kanaEl.value.length;
-  const e = kanaEl.selectionEnd ?? kanaEl.value.length;
+  const len = kanaEl.value.length;
+  let s = Math.min(caret ? caret.s : len, len);
+  const e = Math.min(caret ? caret.e : len, len);
   kanaEl.value = kanaEl.value.slice(0, s) + text + kanaEl.value.slice(e);
   const pos = s + text.length;
+  caret = { s: pos, e: pos };
   kanaEl.setSelectionRange(pos, pos);
 }
 // 커서 앞 한 글자 삭제 (선택 영역이 있으면 그 영역 삭제)
 function backspaceKana() {
-  let s = kanaEl.selectionStart ?? kanaEl.value.length;
-  const e = kanaEl.selectionEnd ?? kanaEl.value.length;
+  const len = kanaEl.value.length;
+  let s = Math.min(caret ? caret.s : len, len);
+  const e = Math.min(caret ? caret.e : len, len);
   if (s === e) { if (s === 0) return; s -= 1; }
   kanaEl.value = kanaEl.value.slice(0, s) + kanaEl.value.slice(e);
+  caret = { s, e: s };
   kanaEl.setSelectionRange(s, s);
 }
 
-// 키보드 펼치기/접기
-kbToggle.addEventListener('click', () => {
-  kbdEl.hidden = !kbdEl.hidden;
-  kbToggle.classList.toggle('active', !kbdEl.hidden);
-});
+function openKeyboard() { kbdEl.hidden = false; kbToggle.classList.add('active'); }
+function closeKeyboard() { kbdEl.hidden = true; kbToggle.classList.remove('active'); }
 
-// mousedown에서 처리(+preventDefault)해 가나 칸의 포커스·커서 위치를 유지
-kbdEl.addEventListener('mousedown', (e) => {
+kbToggle.addEventListener('click', () => (kbdEl.hidden ? openKeyboard() : closeKeyboard()));
+// 배경/닫기 버튼 클릭, Esc 로 닫기
+kbdEl.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeKeyboard(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !kbdEl.hidden) closeKeyboard(); });
+
+// mousedown에서 처리(+preventDefault)해 모달 클릭이 가나 칸 선택을 흐트러뜨리지 않게
+kbdBody.addEventListener('mousedown', (e) => {
   const b = e.target.closest('button[data-k]');
   if (!b) return;
   e.preventDefault();
   if (b.dataset.k === '⌫') backspaceKana();
   else insertKana(b.dataset.k);
-  kanaEl.focus();
 });
+
+// 첫 로드 시 기본 한국어를 변환해 변환결과 칸을 채운다
+regenerate();

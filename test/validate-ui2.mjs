@@ -12,16 +12,19 @@ await page.goto(base,{waitUntil:'load'});
 let fail=false; const check=(c,m)=>{console.log((c?'  OK  ':'  FAIL')+' '+m);if(!c)fail=true;};
 const kana=()=>page.$eval('#kana',e=>e.value);
 
-check((await kana())==='','초기 변환결과 칸은 비어 있음');
+const k0=await kana(); console.log('초기 가나:',k0);
+check(/[ァ-ヶ]/.test(k0)&&!/[ぁ-ゖ]/.test(k0),'초기 = 가타카나로 채워짐');
 
-// 가나 키보드: 토글 후 키를 누르면 가나 칸에 삽입
-check(await page.$eval('#kbd',e=>e.hidden),'키보드는 기본 접힘');
+// 가나 키보드(모달): 열기 → 키 입력 → 닫기
+check(await page.$eval('#kbd',e=>e.hidden),'키보드 모달은 기본 닫힘');
 await page.click('#kbtoggle');
-check(!(await page.$eval('#kbd',e=>e.hidden)),'토글 시 키보드 펼침');
+check(!(await page.$eval('#kbd',e=>e.hidden)),'토글 시 키보드 모달 열림');
 const before=await kana();
 await page.click('#kbd button[data-k="カ"]');
 const after=await kana();
 check(after.includes('カ')&&after.length===before.length+1,'키보드 カ 입력 시 가나 칸에 삽입');
+await page.click('.kbd-close');
+check(await page.$eval('#kbd',e=>e.hidden),'닫기 버튼으로 모달 닫힘');
 
 await page.$eval('#text',e=>{e.value='';});
 await page.type('#text','과자');
