@@ -45,7 +45,25 @@
   .kana-wrap { margin-top:24px; }
   .kana-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .kana-head label { margin:0; }
-  #autoslash { margin-top:8px; font-size:12px; font-weight:600; }
+  .switch {
+    margin-top:8px; width:auto; display:inline-flex; align-items:center; gap:8px;
+    padding:5px 12px 5px 7px; font-size:12px; font-weight:600;
+    color:var(--muted); background:#fff; border:1px solid var(--line);
+    border-radius:20px; transition:color .15s, border-color .15s;
+  }
+  .switch .track {
+    position:relative; width:34px; height:18px; flex:none;
+    background:#cfc8ba; border-radius:9px; transition:background .15s;
+  }
+  .switch .knob {
+    position:absolute; top:2px; left:2px; width:14px; height:14px;
+    background:#fff; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.3);
+    transition:left .15s;
+  }
+  .switch:hover:not(:disabled) { background:#faf7ef; }
+  .switch.active { color:var(--accent2); border-color:var(--accent); background:#fff; }
+  .switch.active .track { background:var(--accent); }
+  .switch.active .knob { left:18px; }
   .kb-toggle {
     margin:0; width:auto; padding:6px 9px; display:inline-flex; align-items:center;
     border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--muted); transition:none;
@@ -95,8 +113,10 @@
 
     <label for="text">읽을 한국어</label>
     <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
-    <button type="button" id="autoslash" class="kb-toggle active"
-            aria-pressed="true" title="띄어쓰기를 악센트구 구분자 / 로 자동 변환">자동 /</button>
+    <button type="button" id="autoslash" class="switch active" role="switch"
+            aria-pressed="true" title="띄어쓰기를 악센트구 구분자 / 로 자동 변환">
+      <span class="track"><span class="knob"></span></span>자동 /
+    </button>
 
     <div class="row">
       <div>
