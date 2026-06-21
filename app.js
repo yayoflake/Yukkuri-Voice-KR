@@ -1,6 +1,6 @@
 // app.js — UI 글루: 한국어 → 가타카나 변환 후 AquesTalk1로 합성/재생
 import { load } from './vendor/aquestalk.bundle.js';
-import { koreanToKatakana, kataToHira, hiraToKata, normalizeProsody } from './k2k.js';
+import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js';
 import { normalizeNumbers } from './numread.js';
 
 const $ = (id) => document.getElementById(id);
@@ -11,9 +11,8 @@ const speedVal = $('speedval');
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const statusEl = $('status');
-const scriptEl = $('script');      // 가타카나/히라가나 토글
-
-let script = 'kata';               // 현재 표기: 'kata' | 'hira'
+const kbToggle = $('kbtoggle');    // 가나 키보드 펼치기/접기
+const kbdEl = $('kbd');            // 가나 키보드 패널
 
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
@@ -48,10 +47,10 @@ function stopPlayback() {
   if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
 }
 
-// 한국어 입력이 바뀌면 가나 칸을 (현재 표기로) 새로 채운다
+// 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (가타카나)
 function regenerate() {
   const { kana } = koreanToKatakana(normalizeNumbers(textEl.value));
-  kanaEl.value = script === 'hira' ? kataToHira(kana) : kana;
+  kanaEl.value = kana;
 }
 
 // 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
@@ -120,15 +119,81 @@ playBtn.addEventListener('click', onPlayClick);
 // 음성을 바꾸면 재생 중인 소리는 멈춤
 voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); setPlayUI('idle'); } });
 
-// 표기 토글: 현재 칸 내용을 보존한 채 가타카나 ↔ 히라가나로 변환
-scriptEl.addEventListener('click', (e) => {
-  const target = e.target.closest('button[data-script]');
-  if (!target) return;
-  const next = target.dataset.script;
-  if (next === script) return;
-  script = next;
-  for (const b of scriptEl.querySelectorAll('button')) b.classList.toggle('active', b.dataset.script === script);
-  kanaEl.value = script === 'hira' ? kataToHira(kanaEl.value) : hiraToKata(kanaEl.value);
+// ── 가나 키보드 ───────────────────────────────────────────────────
+// 가타카나/탁음·반탁음/작은 가나·기호를 5열 그리드로. ⌫는 커서 앞 한 글자 삭제.
+const KB_BASE = [
+  ['ア','イ','ウ','エ','オ'],
+  ['カ','キ','ク','ケ','コ'],
+  ['サ','シ','ス','セ','ソ'],
+  ['タ','チ','ツ','テ','ト'],
+  ['ナ','ニ','ヌ','ネ','ノ'],
+  ['ハ','ヒ','フ','ヘ','ホ'],
+  ['マ','ミ','ム','メ','モ'],
+  ['ヤ','','ユ','','ヨ'],
+  ['ラ','リ','ル','レ','ロ'],
+  ['ワ','ヲ','ン','',''],
+];
+const KB_DAKU = [
+  ['ガ','ギ','グ','ゲ','ゴ'],
+  ['ザ','ジ','ズ','ゼ','ゾ'],
+  ['ダ','ヂ','ヅ','デ','ド'],
+  ['バ','ビ','ブ','ベ','ボ'],
+  ['パ','ピ','プ','ペ','ポ'],
+];
+const KB_SMALL = [
+  ['ァ','ィ','ゥ','ェ','ォ'],
+  ['ャ','ュ','ョ','ッ','ー'],
+  ["'", '、', '。', '⌫', ''],
+];
+
+function buildKeyboard() {
+  for (const rows of [KB_BASE, KB_DAKU, KB_SMALL]) {
+    const grid = document.createElement('div');
+    grid.className = 'kbd-grid';
+    for (const row of rows) for (const ch of row) {
+      if (ch === '') { const s = document.createElement('span'); s.className = 'spacer'; grid.appendChild(s); continue; }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = ch;
+      b.dataset.k = ch;
+      grid.appendChild(b);
+    }
+    kbdEl.appendChild(grid);
+  }
+}
+buildKeyboard();
+
+// 커서 위치에 문자열 삽입 (선택 영역이 있으면 대체)
+function insertKana(text) {
+  const s = kanaEl.selectionStart ?? kanaEl.value.length;
+  const e = kanaEl.selectionEnd ?? kanaEl.value.length;
+  kanaEl.value = kanaEl.value.slice(0, s) + text + kanaEl.value.slice(e);
+  const pos = s + text.length;
+  kanaEl.setSelectionRange(pos, pos);
+}
+// 커서 앞 한 글자 삭제 (선택 영역이 있으면 그 영역 삭제)
+function backspaceKana() {
+  let s = kanaEl.selectionStart ?? kanaEl.value.length;
+  const e = kanaEl.selectionEnd ?? kanaEl.value.length;
+  if (s === e) { if (s === 0) return; s -= 1; }
+  kanaEl.value = kanaEl.value.slice(0, s) + kanaEl.value.slice(e);
+  kanaEl.setSelectionRange(s, s);
+}
+
+// 키보드 펼치기/접기
+kbToggle.addEventListener('click', () => {
+  kbdEl.hidden = !kbdEl.hidden;
+  kbToggle.classList.toggle('active', !kbdEl.hidden);
+});
+
+// mousedown에서 처리(+preventDefault)해 가나 칸의 포커스·커서 위치를 유지
+kbdEl.addEventListener('mousedown', (e) => {
+  const b = e.target.closest('button[data-k]');
+  if (!b) return;
+  e.preventDefault();
+  if (b.dataset.k === '⌫') backspaceKana();
+  else insertKana(b.dataset.k);
+  kanaEl.focus();
 });
 
 regenerate();

@@ -15,12 +15,14 @@ const kana=()=>page.$eval('#kana',e=>e.value);
 const k0=await kana(); console.log('초기 가나:',k0);
 check(/[ァ-ヶ]/.test(k0)&&!/[ぁ-ゖ]/.test(k0),'초기 = 가타카나로 채워짐');
 
-await page.click('#script button[data-script="hira"]');
-const kh=await kana(); console.log('히라가나:',kh);
-check(/[ぁ-ゖ]/.test(kh)&&!/[ァ-ヶ]/.test(kh),'히라가나 토글 시 히라가나로 변환');
-
-await page.click('#script button[data-script="kata"]');
-check(/[ァ-ヶ]/.test(await kana())&&!/[ぁ-ゖ]/.test(await kana()),'가타카나로 복귀');
+// 가나 키보드: 토글 후 키를 누르면 가나 칸에 삽입
+check(await page.$eval('#kbd',e=>e.hidden),'키보드는 기본 접힘');
+await page.click('#kbtoggle');
+check(!(await page.$eval('#kbd',e=>e.hidden)),'토글 시 키보드 펼침');
+const before=await kana();
+await page.click('#kbd button[data-k="カ"]');
+const after=await kana();
+check(after.includes('カ')&&after.length===before.length+1,'키보드 カ 입력 시 가나 칸에 삽입');
 
 await page.$eval('#text',e=>{e.value='';});
 await page.type('#text','과자');
