@@ -8,6 +8,7 @@ const textEl = $('text');
 const voiceEl = $('voice');
 const speedEl = $('speed');
 const speedVal = $('speedval');
+const convertBtn = $('convert');   // 한국어 → 가나 변환 트리거
 const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const statusEl = $('status');
@@ -114,7 +115,7 @@ async function onPlayClick() {
   });
 }
 
-textEl.addEventListener('input', regenerate);
+convertBtn.addEventListener('click', regenerate);
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 playBtn.addEventListener('click', onPlayClick);
 // 음성을 바꾸면 재생 중인 소리는 멈춤
