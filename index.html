@@ -59,8 +59,11 @@
     background:#fff; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.3);
     transition:left .15s;
   }
+  .switch:hover:not(:disabled) { background:none; color:var(--text); }
   .switch.active { color:var(--accent2); }
+  .switch.active:hover:not(:disabled) { color:var(--accent2); }
   .switch.active .track { background:var(--accent); }
+  .switch:hover:not(:disabled) .track { filter:brightness(.97); }
   .switch.active .knob { left:18px; }
   .kb-toggle {
     margin:0; width:auto; padding:6px 9px; display:inline-flex; align-items:center;
