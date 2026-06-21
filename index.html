@@ -55,19 +55,34 @@
   .kb-wrap { position:relative; }
   .kbd {
     position:absolute; right:0; bottom:calc(100% + 8px); z-index:50;
-    width:min(300px,82vw); max-height:50vh; overflow:auto;
+    width:min(320px,86vw); max-height:56vh; overflow:auto;
     background:var(--card); border:1px solid var(--line); border-radius:12px;
     box-shadow:0 8px 24px rgba(0,0,0,.18); padding:10px;
   }
   .kbd[hidden] { display:none; }
-  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
-  .kbd-grid + .kbd-grid { margin-top:4px; padding-top:6px; border-top:1px dashed var(--line); }
+  .kbd-tabs { display:flex; gap:4px; margin-bottom:8px; position:sticky; top:0; }
+  .kbd-tabs button {
+    margin:0; flex:1; padding:6px 0; font-size:12px; font-weight:600;
+    background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:7px; transition:none;
+  }
+  .kbd-tabs button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; }
+  .kbd-grid[hidden] { display:none; }
   .kbd-grid button {
-    margin:0; width:100%; padding:7px 0; font-size:14px; font-weight:600;
-    background:#fff; color:var(--text); border:1px solid var(--line); border-radius:7px; transition:none;
+    margin:0; width:100%; padding:10px 0; font-size:16px; font-weight:600;
+    background:#fff; color:var(--text); border:1px solid var(--line); border-radius:8px; transition:none;
   }
   .kbd-grid button:hover:not(:disabled) { background:#f0ebe0; }
+  .kbd-grid button:active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .kbd-grid .spacer { visibility:hidden; }
+  @media (max-width:479px) {
+    .kbd {
+      position:fixed; left:0; right:0; bottom:0; top:auto; width:100%;
+      max-width:none; max-height:72vh; border-radius:14px 14px 0 0; padding:12px;
+      box-shadow:0 -8px 30px rgba(0,0,0,.2);
+    }
+    .kbd-grid button { padding:12px 0; font-size:18px; }
+  }
   textarea.kana {
     width:100%; min-height:64px; resize:vertical;
     padding:12px 14px; border:1px dashed var(--line); border-radius:10px;
@@ -126,6 +141,7 @@
             </svg>
           </button>
           <div class="kbd" id="kbd" hidden>
+            <div class="kbd-tabs" id="kbdtabs"></div>
             <div id="kbdbody"></div>
           </div>
         </div>

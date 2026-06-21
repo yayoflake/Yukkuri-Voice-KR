@@ -12,8 +12,9 @@ const playBtn = $('play');
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (재생의 기준)
 const statusEl = $('status');
 const kbToggle = $('kbtoggle');    // 가나 키보드 열기
-const kbdEl = $('kbd');            // 가나 키보드 모달(팝업)
-const kbdBody = $('kbdbody');      // 키 그리드가 들어갈 영역
+const kbdEl = $('kbd');            // 가나 키보드 팝오버
+const kbdTabs = $('kbdtabs');      // 탭(청음/탁음/작은가나)
+const kbdBody = $('kbdbody');      // 탭별 키 그리드가 들어갈 영역
 
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
@@ -121,7 +122,8 @@ playBtn.addEventListener('click', onPlayClick);
 voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); setPlayUI('idle'); } });
 
 // ── 가나 키보드 ───────────────────────────────────────────────────
-// 가타카나/탁음·반탁음/작은 가나·기호를 5열 그리드로. ⌫는 커서 앞 한 글자 삭제.
+// 청음/탁음·반탁음/작은가나·기호를 탭으로 나눠 한 화면당 키 수를 줄이고 키를 키운다.
+// 키는 가나 칸의 (기억해 둔) 커서 위치에 삽입. ⌫는 커서 앞 한 글자 삭제.
 const KB_BASE = [
   ['ア','イ','ウ','エ','オ'],
   ['カ','キ','ク','ケ','コ'],
@@ -147,10 +149,21 @@ const KB_SMALL = [
   ["'", '、', '。', '⌫', ''],
 ];
 
+const KB_TABS = [['청음', KB_BASE], ['탁음·반탁음', KB_DAKU], ['작은가나·기호', KB_SMALL]];
+const kbGrids = [];
+
 function buildKeyboard() {
-  for (const rows of [KB_BASE, KB_DAKU, KB_SMALL]) {
+  KB_TABS.forEach(([label, rows], i) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.textContent = label;
+    tab.dataset.tab = i;
+    if (i === 0) tab.classList.add('active');
+    kbdTabs.appendChild(tab);
+
     const grid = document.createElement('div');
     grid.className = 'kbd-grid';
+    grid.hidden = i !== 0;
     for (const row of rows) for (const ch of row) {
       if (ch === '') { const s = document.createElement('span'); s.className = 'spacer'; grid.appendChild(s); continue; }
       const b = document.createElement('button');
@@ -159,10 +172,20 @@ function buildKeyboard() {
       b.dataset.k = ch;
       grid.appendChild(b);
     }
+    kbGrids.push(grid);
     kbdBody.appendChild(grid);
-  }
+  });
 }
 buildKeyboard();
+
+function showTab(i) {
+  kbGrids.forEach((g, j) => { g.hidden = j !== i; });
+  for (const t of kbdTabs.children) t.classList.toggle('active', Number(t.dataset.tab) === i);
+}
+kbdTabs.addEventListener('click', (e) => {
+  const t = e.target.closest('button[data-tab]');
+  if (t) showTab(Number(t.dataset.tab));
+});
 
 // 가나 칸의 커서 위치를 기억해 둔다(모달이 열리면 포커스가 칸을 벗어나므로).
 let caret = null; // { s, e }

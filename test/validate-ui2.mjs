@@ -15,16 +15,21 @@ const kana=()=>page.$eval('#kana',e=>e.value);
 const k0=await kana(); console.log('초기 가나:',k0);
 check(/[ァ-ヶ]/.test(k0)&&!/[ぁ-ゖ]/.test(k0),'초기 = 가타카나로 채워짐');
 
-// 가나 키보드(팝오버): 열기 → 키 입력 → 닫기
-check(await page.$eval('#kbd',e=>e.hidden),'키보드 팝오버는 기본 닫힘');
+// 가나 키보드(탭 그리드 팝오버): 열기 → 청음 입력 → 탁음 탭 입력 → 닫기
+check(await page.$eval('#kbd',e=>e.hidden),'키보드는 기본 닫힘');
 await page.click('#kbtoggle');
-check(!(await page.$eval('#kbd',e=>e.hidden)),'토글 시 키보드 팝오버 열림');
+check(!(await page.$eval('#kbd',e=>e.hidden)),'토글 시 키보드 열림');
 const before=await kana();
 await page.click('#kbd button[data-k="カ"]');
 const after=await kana();
-check(after.includes('カ')&&after.length===before.length+1,'키보드 カ 입력 시 가나 칸에 삽입');
+check(after.includes('カ')&&after.length===before.length+1,'청음 탭에서 カ 입력');
+await page.click('#kbdtabs button[data-tab="1"]');
+const beforeD=await kana();
+await page.click('#kbd button[data-k="ガ"]');
+const afterD=await kana();
+check(afterD.includes('ガ')&&afterD.length===beforeD.length+1,'탁음 탭 전환 후 ガ 입력');
 await page.click('#kbtoggle');
-check(await page.$eval('#kbd',e=>e.hidden),'토글 다시 누르면 팝오버 닫힘');
+check(await page.$eval('#kbd',e=>e.hidden),'토글 다시 누르면 닫힘');
 
 await page.$eval('#text',e=>{e.value='';});
 await page.type('#text','과자');
