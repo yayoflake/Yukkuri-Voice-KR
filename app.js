@@ -201,34 +201,53 @@ function trimEnds(data, sr) {
 }
 
 // AquesTalk가 ,(、)·.(。)에 넣는 쉼을 부호별 목표 길이로 다시 잡는다(,는 짧게·.는 살짝 길게).
-// 합성된 오디오의 내부 무음 구간을 텍스트의 쉼 부호 순서와 1:1로 매칭한다.
-// (촉음 등 minGap 미만 짧은 무음은 쉼이 아니므로 건드리지 않음. 억양은 그대로, 무음 길이만 조정)
-// 무음 개수와 부호 개수가 어긋나면(촉음 오검출 등) 일괄 단축으로 안전 폴백한다.
+// 핵심: 합성 오디오엔 쉼 무음 말고도 촉음(ッ) 무음이 섞여 있다. 개수로 매칭하면 ッ 때문에
+// 어긋나므로(이전 버그: ,=. 동일), 각 쉼 부호의 "모라 비례 기대 위치"에 가장 가까운 무음을
+// 지목해 그것만 목표 길이로 조정한다. ッ 무음은 위치가 안 맞아 건드려지지 않는다.
 const PAUSE_TARGET = { '、': 0.045, '。': 0.24 };
-function retimePauses(data, sr, pauseChars) {
-  const thr = 0.004, n = data.length, minGap = Math.round(sr * 0.1);
-  const gaps = [];
+function retimePauses(data, sr, fullKana) {
+  const n = data.length, thr = 0.004, minGap = Math.round(sr * 0.05);
+  const gaps = []; // 무음 구간 [start,end) (쉼 + 촉음 등 모두)
   for (let i = 0; i < n;) {
     let j = i;
     if (Math.abs(data[i]) < thr) { while (j < n && Math.abs(data[j]) < thr) j++; if (j - i >= minGap) gaps.push([i, j]); }
     else { while (j < n && Math.abs(data[j]) >= thr) j++; }
     i = j;
   }
-  if (gaps.length === 0) return data;
-  const matched = gaps.length === pauseChars.length;
-  const pieces = []; // [start,end) — 직전 음성 + 줄인 무음을 한 구간으로
-  let prev = 0;
-  for (let k = 0; k < gaps.length; k++) {
-    const [a, b] = gaps[k];
-    const sec = matched ? (PAUSE_TARGET[pauseChars[k]] ?? 0.06) : 0.06;
-    const keep = Math.min(Math.round(sec * sr), b - a); // 원본보다 길게는 안 늘림
+  if (!gaps.length) return data;
+  // 쉼 부호의 기대 위치(샘플) = 모라 누적 비례
+  const total = moraSum(fullKana) || 1;
+  const marks = []; let cum = 0;
+  for (const ch of fullKana) {
+    if (ch === '、' || ch === '。') marks.push({ pos: (cum / total) * n, sec: PAUSE_TARGET[ch] });
+    cum += moraWeight(ch);
+  }
+  if (!marks.length) return data;
+  // 각 부호를 가장 가까운(미사용) 무음에 매칭 (너무 멀면 매칭 안 함)
+  const tol = n * 0.2, used = new Array(gaps.length).fill(false), target = new Map();
+  for (const mk of marks) {
+    let best = -1, bd = Infinity;
+    for (let gi = 0; gi < gaps.length; gi++) {
+      if (used[gi]) continue;
+      const d = Math.abs((gaps[gi][0] + gaps[gi][1]) / 2 - mk.pos);
+      if (d < bd) { bd = d; best = gi; }
+    }
+    if (best >= 0 && bd <= tol) { used[best] = true; target.set(best, mk.sec); }
+  }
+  if (!target.size) return data;
+  // 재조립: 매칭된 무음만 목표 길이로 줄이고, 나머지(촉음 등)는 그대로 둔다
+  const pieces = []; let prev = 0;
+  for (let gi = 0; gi < gaps.length; gi++) {
+    if (!target.has(gi)) continue;
+    const [a, b] = gaps[gi];
+    const keep = Math.min(Math.round(target.get(gi) * sr), b - a); // 원본보다 길게는 안 늘림
     pieces.push([prev, a + keep]);
     prev = b;
   }
   pieces.push([prev, n]);
-  let total = 0; for (const [a, b] of pieces) total += b - a;
-  if (total === n) return data;
-  const out = new Float32Array(total);
+  let outLen = 0; for (const [a, b] of pieces) outLen += b - a;
+  if (outLen === n) return data;
+  const out = new Float32Array(outLen);
   let off = 0; for (const [a, b] of pieces) { out.set(data.subarray(a, b), off); off += b - a; }
   return out;
 }
@@ -370,7 +389,7 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed) {
   await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
   const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
   const sr = decoded.sampleRate;
-  const data = retimePauses(trimEnds(decoded.getChannelData(0), sr), sr, fullKana.match(/[、。]/g) || []);
+  const data = retimePauses(trimEnds(decoded.getChannelData(0), sr), sr, fullKana);
   // 구간을 모라 비례로 입력시각에 매핑해 표본별 피치(반음)·속도 파라미터를 만든다.
   const weights = segs.map((s, i) =>
     moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
