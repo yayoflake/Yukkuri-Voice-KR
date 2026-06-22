@@ -206,91 +206,89 @@ function hann(N) {
   return w;
 }
 
-// 위상 보코더 시간축 신축: 출력 길이 ≈ input.length * S, 피치는 보존.
-function phaseVocoder(input, S) {
-  const N = 1024, Ra = 256, Rs = Math.max(1, Math.round(Ra * S));
-  if (input.length < N) { const p = new Float32Array(N); p.set(input); input = p; }
+// 박스카 이동평균(러닝합)으로 계단 파라미터를 완만한 램프로 바꾼다. 경계의 피치/속도
+// 급변을 win 길이에 걸쳐 점진적 글라이드로 만들어 불연속(클릭)과 계단형 억양을 없앤다.
+function smooth(arr, win) {
+  const n = arr.length;
+  if (win < 2 || n === 0) return arr;
+  const half = win >> 1;
+  const out = new Float32Array(n);
+  let sum = 0;
+  for (let i = 0; i < Math.min(half, n); i++) sum += arr[i];
+  let cnt = Math.min(half, n);
+  for (let i = 0; i < n; i++) {
+    const add = i + half, sub = i - half - 1;
+    if (add < n) { sum += arr[add]; cnt++; }
+    if (sub >= 0) { sum -= arr[sub]; cnt--; }
+    out[i] = sum / cnt;
+  }
+  return out;
+}
+
+// 양끝에 짧은 페이드(클릭 방지). 재생 시작/자동정지 순간의 "툭"을 없앤다. (제자리 수정)
+function fadeEdges(a, sr) {
+  const f = Math.min(Math.round(sr * 0.008), a.length >> 1);
+  for (let i = 0; i < f; i++) { const t = i / f; a[i] *= t; a[a.length - 1 - i] *= t; }
+  return a;
+}
+
+// 시변(time-varying) 위상 보코더: 전체를 한 번에 통과시키며 표본별 피치비 p[]·시간축 g[](=p*속도)를
+// 적용한다. 합성 위상(sumPhase)이 끝까지 안 끊겨 구간 경계의 클릭이 원천적으로 안 생긴다.
+//   1단계: 가변 분석홉으로 g 배 시간신축(피치 보존) → Y
+//   2단계: Y를 p 비율로 가변 리샘플 → 피치 ×p, 길이는 g/p=속도배
+function warpVocoder(x, g, p, sr) {
+  const N = 1024, Rs = 256, twoPi = 2 * Math.PI, L = x.length;
   const win = hann(N);
-  const numFrames = Math.floor((input.length - N) / Ra) + 1;
-  const outLen = (numFrames - 1) * Rs + N;
-  const out = new Float32Array(outLen), norm = new Float32Array(outLen);
+  let G = 0; for (let i = 0; i < L; i++) G += g[i];          // ≈ 1단계 출력 길이
+  const framesCap = Math.ceil(G / Rs) + 4;
+  const Y = new Float32Array(framesCap * Rs + N), Ynorm = new Float32Array(Y.length);
+  const taAtFrame = new Float32Array(framesCap);
   const lastPhase = new Float32Array(N / 2 + 1), sumPhase = new Float32Array(N / 2 + 1);
   const re = new Float32Array(N), im = new Float32Array(N);
-  const twoPi = 2 * Math.PI;
-  for (let f = 0; f < numFrames; f++) {
-    const inOff = f * Ra;
-    for (let i = 0; i < N; i++) { re[i] = input[inOff + i] * win[i]; im[i] = 0; }
+  let ta = 0, prevTa = 0, m = 0;
+  while (ta + N <= L && m < framesCap) {
+    const base = Math.floor(ta);
+    for (let i = 0; i < N; i++) { re[i] = x[base + i] * win[i]; im[i] = 0; }
     fft(re, im, false);
+    const da = ta - prevTa; // 이번 프레임의 분석홉(가변)
     for (let k = 0; k <= N / 2; k++) {
       const mag = Math.hypot(re[k], im[k]);
       const phase = Math.atan2(im[k], re[k]);
-      if (f === 0) { sumPhase[k] = phase; }
+      if (m === 0) { sumPhase[k] = phase; }
       else {
-        const omega = (twoPi * Ra * k) / N;
-        let dphi = phase - lastPhase[k] - omega;
-        dphi -= twoPi * Math.round(dphi / twoPi); // 위상을 -π..π로
-        sumPhase[k] += (omega + dphi) * Rs / Ra;
+        const omega = twoPi * k / N;            // 표본당 빈 중심 주파수
+        let dphi = phase - lastPhase[k] - omega * da;
+        dphi -= twoPi * Math.round(dphi / twoPi);
+        sumPhase[k] += (omega + dphi / da) * Rs; // 참주파수 × 합성홉
       }
       lastPhase[k] = phase;
       re[k] = mag * Math.cos(sumPhase[k]); im[k] = mag * Math.sin(sumPhase[k]);
     }
-    for (let k = 1; k < N / 2; k++) { re[N - k] = re[k]; im[N - k] = -im[k]; } // 에르미트 대칭
+    for (let k = 1; k < N / 2; k++) { re[N - k] = re[k]; im[N - k] = -im[k]; }
     im[0] = 0; im[N / 2] = 0;
     fft(re, im, true);
-    const outOff = f * Rs;
-    for (let i = 0; i < N; i++) { out[outOff + i] += re[i] * win[i]; norm[outOff + i] += win[i] * win[i]; }
+    const off = m * Rs;
+    for (let i = 0; i < N; i++) { Y[off + i] += re[i] * win[i]; Ynorm[off + i] += win[i] * win[i]; }
+    taAtFrame[m] = ta;
+    prevTa = ta;
+    ta += Rs / g[Math.min(L - 1, base)]; // g>1 → 천천히 전진(늘림)
+    m++;
   }
-  for (let i = 0; i < outLen; i++) if (norm[i] > 1e-6) out[i] /= norm[i];
-  return out;
-}
+  const numFrames = m, Ylen = numFrames > 0 ? (numFrames - 1) * Rs + N : 0;
+  for (let i = 0; i < Ylen; i++) if (Ynorm[i] > 1e-6) Y[i] /= Ynorm[i];
 
-// 선형보간 리샘플: ratio>1이면 빨리 읽어 길이↓·피치↑.
-function resampleArray(src, ratio) {
-  const outLen = Math.max(1, Math.round(src.length / ratio));
-  const out = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const pos = i * ratio, i0 = Math.floor(pos), frac = pos - i0;
-    const a = src[i0] ?? 0, b = src[i0 + 1] ?? a;
-    out[i] = a + (b - a) * frac;
+  // 2단계: Y를 p 비율로 가변 리샘플 (p는 해당 프레임의 입력시각 ta로 역참조)
+  const fin = new Float32Array(Math.ceil(Ylen * 2) + 4);
+  let rp = 0, fi = 0;
+  while (rp < Ylen - 1 && fi < fin.length) {
+    const fm = Math.min(numFrames - 1, Math.floor(rp / Rs));
+    const tau = taAtFrame[fm];
+    const pl = p[Math.min(L - 1, Math.max(0, Math.round(tau)))] || 1;
+    const i0 = Math.floor(rp), frac = rp - i0;
+    fin[fi++] = Y[i0] + (Y[i0 + 1] - Y[i0]) * frac;
+    rp += pl;
   }
-  return out;
-}
-
-// 한 구간을 시간축 timeScale 배·피치 ×p 로 변형.
-//   피치 ×p: 보코더로 p배 늘린 뒤 리샘플로 p배 압축 → 길이 유지, 피치만 ×p.
-//   속도(timeScale): 보코더 신축에 곱해 길이를 timeScale 배로.
-//   합치면 보코더 신축 = p*timeScale, 그다음 리샘플 ÷p.
-function processSlice(slice, timeScale, p) {
-  if (timeScale === 1 && p === 1) return slice;
-  const stretched = phaseVocoder(slice, p * timeScale);
-  return p === 1 ? stretched : resampleArray(stretched, p);
-}
-
-// 슬라이스들을 이어붙인다. 변형된(피치/속도 다른) 경계는 위상이 안 맞아 클릭이 나므로
-// 길고 부드러운 등파워(constant-power) 크로스페이드로 섞는다. 변형 안 한 경계는 원래
-// 연속이라 그냥 맞붙인다(fade 0). 짧은 슬라이스에선 길이에 맞춰 fade가 줄어든다.
-function concatSlices(items, sr) {
-  if (!items.length) return new Float32Array(0);
-  const maxFade = Math.round(sr * 0.015); // 15ms
-  let cap = 0; for (const it of items) cap += it.data.length;
-  const out = new Float32Array(cap);
-  out.set(items[0].data, 0);
-  let pos = items[0].data.length;
-  for (let i = 1; i < items.length; i++) {
-    const s = items[i].data;
-    const want = (items[i - 1].processed || items[i].processed) ? maxFade : 0;
-    const f = Math.min(want, pos, s.length);
-    const start = pos - f;
-    for (let j = 0; j < f; j++) {
-      const t = (j + 0.5) / f;            // 0..1
-      const a = Math.cos(t * Math.PI / 2); // 등파워: a²+b²=1 (진폭 함몰/클릭 방지)
-      const b = Math.sin(t * Math.PI / 2);
-      out[start + j] = out[start + j] * a + s[j] * b;
-    }
-    out.set(s.subarray(f), start + f);
-    pos = start + f + (s.length - f);
-  }
-  return out.slice(0, pos);
+  return fin.subarray(0, fi);
 }
 
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
@@ -331,28 +329,39 @@ async function playKana(kana, btn) {
     const sr = decoded.sampleRate;
     const data = trimEnds(decoded.getChannelData(0), sr);
 
-    // ② 구간을 모라 비례로 시간 슬라이스 → 속도/피치 다른 구간만 보코더로 변형
-    // 맨 끝의 쉼(。、)·공백은 trimEnds로 잘려 오디오에 없으니 가중치에서 뺀다
-    // (안 그러면 분모가 부풀어 앞 구간 경계가 너무 일찍 떨어짐). 내부 쉼은 오디오에 남아 그대로 센다.
+    // ② 구간을 모라 비례로 입력시각에 매핑해, 표본별 피치(반음)·속도 파라미터를 만든다.
+    // 맨 끝의 쉼(。、)·공백은 trimEnds로 잘려 오디오에 없으니 가중치에서 뺀다(분모 부풀어 경계가
+    // 일찍 떨어지는 것 방지). 내부 쉼은 오디오에 남아 그대로 센다.
     const weights = segs.map((s, i) =>
       moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
     const total = weights.reduce((a, b) => a + b, 0) || 1;
     const M = data.length;
-    const items = [];
-    let cum = 0;
+    const semisArr = new Float32Array(M);   // 표본별 반음
+    const tsArr = new Float32Array(M).fill(1); // 표본별 시간축(=baseSpeed/속도)
+    let cum = 0, changed = false;
     for (let i = 0; i < segs.length; i++) {
       const startS = Math.round((cum / total) * M);
       cum += weights[i];
       const endS = i === segs.length - 1 ? M : Math.round((cum / total) * M);
-      if (endS <= startS) continue; // 시간 없는 구간(' / 공백만 등)
-      const slice = data.subarray(startS, endS);
-      const timeScale = baseSpeed / segs[i].speed; // 속도↑ → 압축
-      const p = Math.pow(2, segs[i].semis / 12);
-      const processed = !(timeScale === 1 && p === 1);
-      if (processed) await new Promise((r) => setTimeout(r, 0));
-      items.push({ data: processed ? processSlice(slice, timeScale, p) : slice, processed });
+      const ts = baseSpeed / segs[i].speed;
+      for (let n = startS; n < endS; n++) { semisArr[n] = segs[i].semis; tsArr[n] = ts; }
+      if (segs[i].semis !== 0 || segs[i].speed !== baseSpeed) changed = true;
     }
-    const merged = concatSlices(items, sr);
+
+    let merged;
+    if (!changed) {
+      merged = data.slice(); // 태그 없음 → 원본 그대로 (끝 페이드만)
+    } else {
+      await new Promise((r) => setTimeout(r, 0)); // 무거운 변형 전 UI 양보
+      // 경계를 ~40ms 램프로 완만하게: 계단형 급변과 위상 불연속 제거
+      const win = Math.max(2, Math.round(sr * 0.04));
+      const sS = smooth(semisArr, win), tS = smooth(tsArr, win);
+      const p = new Float32Array(M), g = new Float32Array(M);
+      for (let n = 0; n < M; n++) { p[n] = Math.pow(2, sS[n] / 12); g[n] = p[n] * tS[n]; }
+      merged = warpVocoder(data, g, p, sr);
+    }
+    fadeEdges(merged, sr); // 시작/끝 클릭 방지
+
     buffer = merged.length ? ctx.createBuffer(1, merged.length, sr) : null;
     if (buffer) buffer.copyToChannel(merged, 0);
   } catch (e) {
