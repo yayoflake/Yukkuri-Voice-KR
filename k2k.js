@@ -163,13 +163,9 @@ function tokenize(text) {
       tokens.push({ type: 'raw', kana: '/' });
       lastSyl = null;
       pendingBoundary = false;
-    } else if (ch === '\n' || ch === '\r') {
-      // 줄바꿈: 문장 끝으로 보고 쉼(。)
-      tokens.push({ type: 'sep', kana: '。' });
-      lastSyl = null;
-      pendingBoundary = false;
     } else if (/\s/.test(ch)) {
-      // 공백(줄바꿈 제외)은 어절 경계로 본다. 다음 음절에 boundaryBefore를 달아
+      // 공백·줄바꿈은 모두 어절 경계로만 본다(。을 만들지 않는다 — 빈 줄이 。가 되던 문제).
+      // 다음 음절에 boundaryBefore를 달아
       // 연음을 절음(받침→대표음 후 연음)으로 처리하고(샤인머스캣 알아 → …ケダラ),
       // ㅎ약화는 막으며, 연음으로 안 묶인 경계엔 악센트구 구분자 / 를 넣는다.
       pendingBoundary = true;
