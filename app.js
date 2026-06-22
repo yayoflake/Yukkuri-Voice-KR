@@ -240,10 +240,13 @@ function smooth(arr, win) {
   return out;
 }
 
-// 양끝에 짧은 페이드(클릭 방지). 재생 시작/자동정지 순간의 "툭"을 없앤다. (제자리 수정)
+// 양끝 페이드(클릭/끊김 방지). 끝은 좀 더 길게 줘 마지막 음절이 "팍" 잘리지 않고
+// 자연스럽게 잦아들게 한다. (제자리 수정)
 function fadeEdges(a, sr) {
-  const f = Math.min(Math.round(sr * 0.008), a.length >> 1);
-  for (let i = 0; i < f; i++) { const t = i / f; a[i] *= t; a[a.length - 1 - i] *= t; }
+  const fi = Math.min(Math.round(sr * 0.006), a.length >> 1);   // 시작 6ms
+  const fo = Math.min(Math.round(sr * 0.018), a.length >> 1);   // 끝 18ms
+  for (let i = 0; i < fi; i++) a[i] *= i / fi;
+  for (let i = 0; i < fo; i++) a[a.length - 1 - i] *= i / fo;
   return a;
 }
 
@@ -254,16 +257,19 @@ function fadeEdges(a, sr) {
 function warpVocoder(x, g, p, sr) {
   const N = 1024, Rs = 256, twoPi = 2 * Math.PI, L = x.length;
   const win = hann(N);
+  // 끝에 N 무음 패딩: 분석 프레임이 마지막 실제 샘플까지 완전히 덮게 한다. 패딩이 없으면
+  // 루프가 입력 끝 N만큼을 못 읽어 마지막 음절이 잘리고, 정규화 테이퍼도 끝 음절을 깎는다.
+  const xp = new Float32Array(L + N); xp.set(x);
   let G = 0; for (let i = 0; i < L; i++) G += g[i];          // ≈ 1단계 출력 길이
-  const framesCap = Math.ceil(G / Rs) + 4;
+  const framesCap = Math.ceil(G / Rs) + 8;
   const Y = new Float32Array(framesCap * Rs + N), Ynorm = new Float32Array(Y.length);
   const taAtFrame = new Float32Array(framesCap);
   const lastPhase = new Float32Array(N / 2 + 1), sumPhase = new Float32Array(N / 2 + 1);
   const re = new Float32Array(N), im = new Float32Array(N);
   let ta = 0, prevTa = 0, m = 0;
-  while (ta + N <= L && m < framesCap) {
+  while (ta < L && m < framesCap) { // 마지막 실제 샘플(ta<L)까지 프레임 생성
     const base = Math.floor(ta);
-    for (let i = 0; i < N; i++) { re[i] = x[base + i] * win[i]; im[i] = 0; }
+    for (let i = 0; i < N; i++) { re[i] = xp[base + i] * win[i]; im[i] = 0; }
     fft(re, im, false);
     const da = ta - prevTa; // 이번 프레임의 분석홉(가변)
     for (let k = 0; k <= N / 2; k++) {
