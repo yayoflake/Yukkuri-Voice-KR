@@ -29,6 +29,7 @@ let current = null;        // { voice, aq }
 let busy = false;          // 로드/합성 중 (이때 버튼은 잠금)
 let audioCtx = null;       // Web Audio 컨텍스트 (구간 합성 결과를 이어붙여 재생)
 let currentSource = null;  // 재생 중인 BufferSource (있으면 = 재생 중)
+let currentGain = null;    // 재생 체인의 GainNode (정지 시 램프다운용)
 let activeBtn = null;      // 재생/준비 UI를 표시 중인 버튼 (위/아래)
 
 function getCtx() {
@@ -61,13 +62,25 @@ function resetPlayUI() {
   activeBtn = null;
 }
 
-// 재생 중지 + 리소스 정리
+// 재생 중지 + 리소스 정리. 파형 중간에서 뚝 끊으면 클릭이 나므로, 게인을 짧게 램프다운한
+// 뒤 정지·해제한다. (자연 종료로 불려도 안전 — 이미 끝났으면 stop은 무시됨)
 function stopPlayback() {
-  if (currentSource) {
-    currentSource.onended = null;
-    try { currentSource.stop(); } catch { /* 이미 끝남 */ }
-    currentSource.disconnect();
-    currentSource = null;
+  if (!currentSource) return;
+  const src = currentSource, gain = currentGain;
+  src.onended = null;
+  currentSource = null; currentGain = null;
+  if (gain && audioCtx) {
+    const t = audioCtx.currentTime;
+    try {
+      gain.gain.cancelScheduledValues(t);
+      gain.gain.setValueAtTime(gain.gain.value, t);
+      gain.gain.linearRampToValueAtTime(0, t + 0.012); // 12ms 페이드아웃
+    } catch { /* 무시 */ }
+    try { src.stop(t + 0.02); } catch { /* 이미 끝남 */ }
+    setTimeout(() => { try { src.disconnect(); gain.disconnect(); } catch { /* 무시 */ } }, 60);
+  } else {
+    try { src.stop(); } catch { /* 이미 끝남 */ }
+    try { src.disconnect(); } catch { /* 무시 */ }
   }
 }
 
@@ -277,7 +290,11 @@ function warpVocoder(x, g, p, sr) {
     m++;
   }
   const numFrames = m, Ylen = numFrames > 0 ? (numFrames - 1) * Rs + N : 0;
-  for (let i = 0; i < Ylen; i++) if (Ynorm[i] > 1e-6) Y[i] /= Ynorm[i];
+  // 합성측 overlap-add 정규화. 합성홉 Rs가 일정해 가운데(완전 겹침)의 norm은 상수다.
+  // 표본별 Ynorm으로 나누면 겹침이 적은 양끝에서 0에 가까운 값으로 나눠 진폭이 폭발한다
+  // (끝부분 "팍팍" 튐의 원인). 그 상수(최댓값)로 나누면 양끝은 자연 감쇠(테이퍼)돼 폭발이 없다.
+  let maxN = 0; for (let i = 0; i < Ylen; i++) if (Ynorm[i] > maxN) maxN = Ynorm[i];
+  if (maxN > 0) for (let i = 0; i < Ylen; i++) Y[i] /= maxN;
 
   // 2단계: Y를 p 비율로 가변 리샘플 (p는 해당 프레임의 입력시각 ta로 역참조)
   const fin = new Float32Array(Math.ceil(Ylen * 2) + 4);
@@ -364,7 +381,10 @@ async function playKana(kana, btn) {
     }
     fadeEdges(merged, sr); // 시작/끝 클릭 방지
 
-    buffer = merged.length ? ctx.createBuffer(1, merged.length, sr) : null;
+    // 끝에 무음 패딩 — 자연 종료(자동 정지)의 노드 해제·스트림 닫힘이 무음 구간에서
+    // 일어나게 해 "팍" 소리를 분리한다.
+    const pad = Math.round(sr * 0.04);
+    buffer = merged.length ? ctx.createBuffer(1, merged.length + pad, sr) : null;
     if (buffer) buffer.copyToChannel(merged, 0);
   } catch (e) {
     console.error(e);
@@ -376,13 +396,16 @@ async function playKana(kana, btn) {
   busy = false;
   if (!buffer) { setError(btn, '합성 결과가 비어 있음'); resetPlayUI(); return; }
 
-  // 2) 재생 시작
+  // 2) 재생 시작 (Source → Gain → 출력. 정지 시 게인 램프다운으로 클릭 방지)
   stopPlayback(); // 혹시 남은 것 정리
   const ctx = getCtx();
   const src = ctx.createBufferSource();
+  const gain = ctx.createGain();
   src.buffer = buffer;
-  src.connect(ctx.destination);
+  src.connect(gain);
+  gain.connect(ctx.destination);
   currentSource = src;
+  currentGain = gain;
   src.onended = () => { if (currentSource === src) { stopPlayback(); resetPlayUI(); } };
   setPlayUI(btn, 'playing');
   src.start();
