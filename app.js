@@ -172,13 +172,31 @@ function clearHighlight() {
   hideKanaView();
 }
 
-// 가나 칸 텍스트를 덩어리로 나누고, 오디오 길이를 (덩어리 모라 비례 + 쉼 실시간)으로 분배해
-// 각 덩어리의 시작시각을 만든다. [속도] 태그는 그 구간의 말하는 박자만 빠르게/느리게.
-function buildHighlight(text, duration, baseSpeed) {
+// 합성 오디오에서 minGapSec 이상 이어지는 무음 구간 [start,end](초)을 찾는다.
+// retimePauses와 같은 임계(0.004)를 쓴다. 촉음 ッ 무음은 짧아(<minGap) 안 걸리고,
+// 마침표(.。) 쉼(~0.24s)은 걸리게 minGapSec을 그 사이(0.12s)로 둔다.
+function detectSilenceGaps(data, sr, minGapSec) {
+  const n = data.length, thr = 0.004, minGap = Math.round(sr * minGapSec);
+  const gaps = [];
+  for (let i = 0; i < n;) {
+    if (Math.abs(data[i]) < thr) {
+      let j = i; while (j < n && Math.abs(data[j]) < thr) j++;
+      if (j - i >= minGap) gaps.push([i / sr, j / sr]);
+      i = j;
+    } else { let j = i; while (j < n && Math.abs(data[j]) >= thr) j++; i = j; }
+  }
+  return gaps;
+}
+
+// 가나 칸 텍스트를 덩어리로 나누고, 마침표 쉼(.。)을 합성 오디오의 실제 무음에 "앵커"로
+// 고정한 뒤, 앵커 사이 구간만 모라 비례로 분배해 각 덩어리의 시작시각을 만든다.
+// (앵커가 문장마다 시각을 다시 잡아 줘서 누적 오차가 안 쌓인다. data 없으면 전체를 모라 비례로.)
+// [속도] 태그는 그 구간의 말하는 박자만 빠르게/느리게. 쉼표(,)는 앵커 안 하고 잔여로 둔다.
+function buildHighlight(text, duration, baseSpeed, data, sr) {
   const n = text.length;
-  // 1) 덩어리(말소리 범위)와 그 앞에 쌓인 쉼(초)을 모은다.
-  const chunks = []; // { a, b, mora, lead }
-  let cur = null, pending = 0, speed = baseSpeed;
+  // 1) 덩어리(말소리 범위)와 그 앞 쉼(초)·마침표 여부(major)를 모은다.
+  const chunks = []; // { a, b, mora, lead, major }
+  let cur = null, pending = 0, pendingMajor = false, speed = baseSpeed;
   for (let i = 0; i < n; i++) {
     const ch = text[i];
     if (ch === '[') {
@@ -188,29 +206,49 @@ function buildHighlight(text, duration, baseSpeed) {
     if (HL_SEP.has(ch)) {
       if (cur) { chunks.push(cur); cur = null; }
       pending += hlPauseSec(ch);
+      if (ch === '.' || ch === '。') pendingMajor = true;
       continue;
     }
-    if (!cur) { cur = { a: i, b: i + 1, mora: 0, lead: pending }; pending = 0; }
+    if (!cur) { cur = { a: i, b: i + 1, mora: 0, lead: pending, major: pendingMajor }; pending = 0; pendingMajor = false; }
     else cur.b = i + 1;
     cur.mora += hlMora(ch) * (baseSpeed / speed);
   }
   if (cur) chunks.push(cur);
-  // 앞·뒤 쉼은 trimEnds로 오디오에서 잘려 나가므로 타이밍에 넣지 않는다.
-  if (chunks.length) chunks[0].lead = 0;
 
   const real = chunks.filter((c) => c.mora > 0);
   if (!real.length) { hlSegs = null; return; }
-  const totalMora = real.reduce((s, c) => s + c.mora, 0);
-  let totalPause = 0; for (const c of real) totalPause += c.lead;
-  const speechDur = Math.max(0, duration - totalPause);
+  // 앞 쉼은 trimEnds로 오디오에서 잘려 나가므로 첫 덩어리는 쉼·앵커 없음.
+  real[0].lead = 0; real[0].major = false;
 
-  // 2) 시간을 누적해 각 덩어리의 시작시각을 잡는다.
+  // 2) 마침표 경계(major)를 오디오의 실제 무음에 1:1로 맞춘다(긴 무음 우선, 위치 순).
+  const majorPos = []; for (let i = 1; i < real.length; i++) if (real[i].major) majorPos.push(i);
+  let anchors = [];
+  if (data && majorPos.length) {
+    const gaps = detectSilenceGaps(data, sr, 0.12);
+    const m = Math.min(gaps.length, majorPos.length);
+    anchors = gaps.slice().sort((x, y) => (y[1] - y[0]) - (x[1] - x[0])).slice(0, m).sort((x, y) => x[0] - y[0]);
+  }
+  const A = anchors.length; // 실제로 앵커한 마침표 수
+
+  // 3) 앵커로 끊은 "구절"마다 [T0,T1] 안에서 모라 비례로 분배(쉼표는 잔여 쉼으로 끼움).
   const segs = [];
-  let t = 0;
-  for (const c of real) {
-    t += c.lead;                 // 이 덩어리 앞 쉼만큼 흘려보냄
-    segs.push({ a: c.a, b: c.b, start: t });
-    t += speechDur * (c.mora / totalMora);
+  const layout = (lo, hi, T0, T1) => { // real[lo..hi] 를 [T0,T1]에 배치
+    let M = 0, C = 0;
+    for (let i = lo; i <= hi; i++) { M += real[i].mora; if (i > lo) C += real[i].lead; }
+    const D = Math.max(0, (T1 - T0) - C);
+    let t = T0;
+    for (let i = lo; i <= hi; i++) {
+      if (i > lo) t += real[i].lead;            // 구절 안 쉼표만큼 흘려보냄
+      segs.push({ a: real[i].a, b: real[i].b, start: t });
+      if (M > 0) t += D * (real[i].mora / M);
+    }
+  };
+  for (let k = 0; k <= A; k++) {
+    const lo = k === 0 ? 0 : majorPos[k - 1];
+    const hi = k === A ? real.length - 1 : majorPos[k] - 1;
+    const T0 = k === 0 ? 0 : anchors[k - 1][1];          // 직전 무음 끝
+    const T1 = k === A ? duration : anchors[k][0];       // 다음 무음 시작
+    layout(lo, hi, T0, T1);
   }
   hlSegs = segs;
 }
@@ -227,9 +265,10 @@ function highlightTick() {
 }
 
 // 고급 재생이 막 시작될 때 호출 — div로 바꿔치기하고 타임라인·추적 루프를 건다.
-function startHighlight(duration, baseSpeed) {
+// buffer의 실제 파형으로 마침표 쉼을 앵커링해 동기를 맞춘다.
+function startHighlight(buffer, baseSpeed) {
   clearHighlight();
-  buildHighlight(kanaEl.value, duration, baseSpeed);
+  buildHighlight(kanaEl.value, buffer.duration, baseSpeed, buffer.getChannelData(0), buffer.sampleRate);
   if (!hlSegs) return;
   showKanaView();
   paintHighlight(0);
@@ -720,8 +759,8 @@ async function playKana(kana, btn) {
   src.onended = () => { if (currentSource === src) { stopPlayback(); resetPlayUI(); } };
   setPlayUI(btn, 'playing');
   src.start();
-  // 아래쪽(고급) 재생만: 가나 칸의 현재 글자를 따라 하이라이트한다.
-  if (btn === playKanaBtn) startHighlight(buffer.duration, Number(speedEl.value));
+  // 아래쪽(고급) 재생만: 가나 칸의 현재 덩어리를 따라 하이라이트한다.
+  if (btn === playKanaBtn) startHighlight(buffer, Number(speedEl.value));
 }
 
 textEl.addEventListener('input', regenerate);
