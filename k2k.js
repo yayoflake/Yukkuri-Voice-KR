@@ -386,9 +386,10 @@ export function koreanToKatakana(text, { autoSlash = true } = {}) {
     out.push(buildMora(row, glide, base) + codaKana(t.coda, nextCho) + t.suffix);
   }
 
-  // 후처리 없음: 문장부호·운율기호(。、 / ' ー)는 사용자가 친 그대로 1:1로 내보낸다.
-  // (자동 생성되는 악센트구 / 는 항상 음절과 음절 사이에만 생기므로 합치거나 지울 필요가 없다.)
-  return { kana: out.join('') };
+  // 후처리: 撥音 ン 바로 뒤의 ?(의문 억양)은 AquesTalk1이 제대로 합성하지 못한다.
+  // 억양이 ン 앞 모음에 실리도록 ? 를 ン 앞으로 옮긴다. (만? → マン?. → マ?ン.)
+  const kana = out.join('').replace(/ン\?/g, '?ン');
+  return { kana };
 }
 
 // ── 운율 보조 표기 정규화 (악센트핵 · 장음) ───────────────────────
