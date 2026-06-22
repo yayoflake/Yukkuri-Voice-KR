@@ -12,6 +12,7 @@ const speedVal = $('speedval');
 const playBtn = $('play');         // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
 const playKanaBtn = $('playkana'); // 아래쪽(고급): 가나 칸을 그대로 재생
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (아래쪽 재생의 기준)
+const kanaHlEl = $('kanahli');     // 가나 칸 뒤에 깔린 하이라이트 backdrop (재생 중 글자 표시)
 const kanaReadEl = $('kanaread');  // 가나 칸의 한국어 읽기 발음(보조 표기)
 const msgEl = $('msg');            // 위쪽 재생 버튼 밑 오류 메시지 (붉은글씨)
 const msgKanaEl = $('msgkana');    // 아래쪽 재생 버튼 밑 오류 메시지
@@ -71,6 +72,7 @@ function resetPlayUI() {
   setPlayUI(playBtn, 'idle');
   setPlayUI(playKanaBtn, 'idle');
   activeBtn = null;
+  clearHighlight();
 }
 
 // 재생 중지 + 리소스 정리. 파형 중간에서 뚝 끊으면 클릭이 나므로, 게인을 짧게 램프다운한
@@ -93,6 +95,105 @@ function stopPlayback() {
     try { src.stop(); } catch { /* 이미 끝남 */ }
     try { src.disconnect(); } catch { /* 무시 */ }
   }
+}
+
+// ── 고급 재생 중 글자 하이라이트 ──────────────────────────────────
+// textarea는 글자별 배경을 못 주므로, 같은 글꼴·줄바꿈으로 뒤에 깔린 backdrop(kanaHlEl)에
+// 현재 발음 중인 글자만 <mark>로 칠한다. 시각 표시이므로 표본 단위 정밀 동기까진 안 맞춰도 되고,
+// 가나 칸 텍스트를 모라 가중치(쉼/장음 포함)로 오디오 길이에 비례 분배해 카라오케식으로 따라간다.
+let hlSegs = null;     // [{ idx, start }] — 칠할 글자(쉼 제외)의 시작시각(초), 텍스트 순
+let hlStart = 0;       // 재생 시작 시점의 ctx.currentTime
+let hlRAF = 0;         // requestAnimationFrame 핸들
+let hlActive = -1;     // 현재 칠해진 글자 인덱스
+
+const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
+const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => HTML_ESC[c]);
+
+// 가나 칸의 한 글자가 차지하는 박자(모라). 쉼(.,。、)·장음(-ー)도 시간을 먹으므로 포함한다.
+const HL_SMALL = 'ァィゥェォャュョ';
+function hlMora(ch) {
+  if (ch === '。' || ch === '.') return 1.6;  // 긴 쉼
+  if (ch === '、' || ch === ',') return 0.4;  // 짧은 쉼
+  if (ch === 'ー' || ch === '-') return 1;    // 장음 +1박
+  if (HL_SMALL.includes(ch)) return 0;        // 작은가나는 앞 글자와 한 모라
+  if (/[ぁ-ゖァ-ヶ]/.test(ch)) return 1;       // 가나 1모라 (ッ ン 포함)
+  return 0;                                    // ' / 공백 · 태그문자 등은 시간 없음
+}
+const hlIsPause = (ch) => ch === '。' || ch === '.' || ch === '、' || ch === ',';
+
+// backdrop 스크롤을 textarea에 맞춘다 (긴 텍스트로 칸이 스크롤될 때 어긋나지 않게)
+function syncHighlightScroll() {
+  kanaHlEl.style.transform = `translateY(${-kanaEl.scrollTop}px)`;
+}
+
+// idx 글자만 칠한 backdrop을 그린다. idx<0이면 비운다.
+function paintHighlight(idx) {
+  const text = kanaEl.value;
+  if (idx < 0 || idx >= text.length) {
+    kanaHlEl.textContent = '';
+  } else {
+    kanaHlEl.innerHTML =
+      escapeHtml(text.slice(0, idx)) +
+      '<mark>' + escapeHtml(text[idx]) + '</mark>' +
+      escapeHtml(text.slice(idx + 1));
+  }
+  hlActive = idx;
+  syncHighlightScroll();
+}
+
+function clearHighlight() {
+  if (hlRAF) { cancelAnimationFrame(hlRAF); hlRAF = 0; }
+  hlSegs = null;
+  if (hlActive !== -1) paintHighlight(-1);
+}
+
+// 가나 칸 텍스트를 오디오 길이에 모라 비례로 매핑해 글자별 시작시각을 만든다.
+// [속도] 태그는 그 구간의 "말하는" 박자만 빠르게/느리게 한다(쉼은 그대로).
+function buildHighlight(text, duration, baseSpeed) {
+  const n = text.length;
+  const w = new Float64Array(n);
+  let speed = baseSpeed, total = 0;
+  for (let i = 0; i < n; i++) {
+    const ch = text[i];
+    if (ch === '[') {
+      const m = /^\[(\d{1,3})\]/.exec(text.slice(i, i + 5));
+      if (m) speed = Math.min(300, Math.max(50, Number(m[1])));
+    }
+    const mw = hlMora(ch);
+    if (mw > 0) w[i] = hlIsPause(ch) ? mw : mw * (baseSpeed / speed);
+    total += w[i];
+  }
+  if (total <= 0) { hlSegs = null; return; }
+  const segs = [];
+  let cum = 0;
+  for (let i = 0; i < n; i++) {
+    if (w[i] <= 0) continue;
+    const start = (cum / total) * duration;
+    cum += w[i];
+    // 쉼은 칠하지 않는다(앞 글자가 쉼 동안 계속 켜져 있게) — 시간만 먹고 넘어간다.
+    if (!hlIsPause(text[i])) segs.push({ idx: i, start });
+  }
+  hlSegs = segs.length ? segs : null;
+}
+
+// 재생 동안 매 프레임 현재 시각에 맞는 글자를 칠한다. "이미 시작한 마지막 글자"를 켜므로
+// 쉼 구간엔 직전 글자가 계속 켜져 있고, 글자 사이에 빈틈이 안 생긴다.
+function highlightTick() {
+  if (!hlSegs || !audioCtx) return;
+  const elapsed = audioCtx.currentTime - hlStart;
+  let idx = -1;
+  for (const s of hlSegs) { if (elapsed >= s.start) idx = s.idx; else break; }
+  if (idx !== hlActive) paintHighlight(idx);
+  hlRAF = requestAnimationFrame(highlightTick);
+}
+
+// 고급 재생이 막 시작될 때 호출 — 타임라인을 만들고 추적 루프를 건다.
+function startHighlight(duration, baseSpeed) {
+  clearHighlight();
+  buildHighlight(kanaEl.value, duration, baseSpeed);
+  if (!hlSegs) return;
+  hlStart = audioCtx.currentTime;
+  hlRAF = requestAnimationFrame(highlightTick);
 }
 
 // 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
@@ -578,11 +679,15 @@ async function playKana(kana, btn) {
   src.onended = () => { if (currentSource === src) { stopPlayback(); resetPlayUI(); } };
   setPlayUI(btn, 'playing');
   src.start();
+  // 아래쪽(고급) 재생만: 가나 칸의 현재 글자를 따라 하이라이트한다.
+  if (btn === playKanaBtn) startHighlight(buffer.duration, Number(speedEl.value));
 }
 
 textEl.addEventListener('input', regenerate);
 // 가나 칸을 직접 고치면 한국어 읽기 보조 표기도 따라 갱신
 kanaEl.addEventListener('input', updateKanaRead);
+// 칸이 스크롤되면 뒤의 하이라이트 backdrop도 같이 스크롤
+kanaEl.addEventListener('scroll', syncHighlightScroll);
 // 자동 / 토글 버튼: 켜고 끌 때마다 변환결과를 다시 만든다
 autoSlashBtn.addEventListener('click', () => {
   autoSlash = !autoSlash;
