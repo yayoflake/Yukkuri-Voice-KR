@@ -415,6 +415,38 @@ function splitPause(unit) {
 
 function silenceArr(sec, sr) { return new Float32Array(Math.max(0, Math.round(sec * sr))); }
 
+// AquesTalk1은 촉음 ッ 뒤에 자음으로 시작하는 모라가 와야 한다. 어말·쉼(、。)·x 경계·
+// 모음가나(ア행)·ン·ー·ッ 앞에 놓인 ッ은 합성 오류(ERROR 102)나 이상한 소리(앗→아쏘)를 낸다.
+// 한국어 변환은 어말 파열음 받침을 이미 떨어뜨리지만(codaKana), 가나 칸 직접 입력은
+// 이 경로로 바로 들어오므로 여기서 "매달린 ッ"을 떨어뜨린다. 예) アッ→ア, …ヨ、アッ→…ヨ、ア
+const SOKUON_VOWEL = new Set([...'アイウエオァィゥェォ']);
+function dropDanglingSokuon(s) {
+  const a = [...s];
+  const out = [];
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === 'ッ') {
+      // 뒤따르는 운율기호('><)·구간태그([..]{..})를 건너뛰고 다음 가나를 본다.
+      let j = i + 1;
+      while (j < a.length) {
+        const c = a[j];
+        if (c === "'" || c === '>' || c === '<') { j++; continue; }
+        if (c === '[' || c === '{') {
+          const close = c === '[' ? ']' : '}';
+          while (j < a.length && a[j] !== close) j++;
+          j++; continue;
+        }
+        break;
+      }
+      const nxt = a[j];
+      const geminable = nxt && /[ァ-ヶ]/.test(nxt)
+        && !SOKUON_VOWEL.has(nxt) && nxt !== 'ン' && nxt !== 'ー' && nxt !== 'ッ';
+      if (!geminable) continue; // 떨어뜨림
+    }
+    out.push(a[i]);
+  }
+  return out.join('');
+}
+
 // 오디오/무음 조각들을 잇는다. fade=true(쉼 없는 x 경계)면 등파워 크로스페이드로 매끄럽게
 // 겹치고, 아니면(무음을 낀 경계) 그대로 맞붙인다(조각 끝/시작이 잦아들어 클릭 없음).
 function concatItems(items, sr) {
@@ -459,6 +491,7 @@ async function playKana(kana, btn) {
     .replace(/,/g, '、')
     .replace(/\s+/g, '')
     .trim();
+  kana = dropDanglingSokuon(kana); // 자음 모라가 안 오는 촉음 ッ 제거 (ERROR 102/이상한 소리 방지)
   if (!kana) { setError(btn, '가나가 비어 있음'); return; }
 
   setError(btn); // 이전 오류 메시지 지우기
