@@ -12,7 +12,7 @@ const speedVal = $('speedval');
 const playBtn = $('play');         // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
 const playKanaBtn = $('playkana'); // 아래쪽(고급): 가나 칸을 그대로 재생
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (아래쪽 재생의 기준)
-const kanaHlEl = $('kanahli');     // 가나 칸 뒤에 깔린 하이라이트 backdrop (재생 중 글자 표시)
+const kanaViewEl = $('kanaview');  // 재생 중 textarea 대신 보여줄 하이라이트용 div
 const kanaReadEl = $('kanaread');  // 가나 칸의 한국어 읽기 발음(보조 표기)
 const msgEl = $('msg');            // 위쪽 재생 버튼 밑 오류 메시지 (붉은글씨)
 const msgKanaEl = $('msgkana');    // 아래쪽 재생 버튼 밑 오류 메시지
@@ -98,15 +98,17 @@ function stopPlayback() {
 }
 
 // ── 고급 재생 중 "덩어리(악센트구)" 하이라이트 ────────────────────
-// textarea는 글자별 배경을 못 주므로, 같은 글꼴·줄바꿈으로 뒤에 깔린 backdrop(kanaHlEl)에
-// 현재 발음 중인 덩어리를 통째로 <mark>로 칠한다. 덩어리는 구분 기호(/ . , 。 、 공백 x)로 나뉘며,
-// 그 덩어리가 발음되는 동안 계속 켜 둔다(글자 단위 카라오케가 아님).
+// 하이라이트는 재생 중에만 필요하고 그땐 편집을 안 하므로, textarea를 숨기고 같은 모양의
+// div(kanaViewEl)로 바꿔치기해 거기에 현재 발음 중인 덩어리를 통째로 <mark>로 칠한다.
+// (겹치는 backdrop이 아니라 교체라 두 레이어를 픽셀로 맞출 필요가 없다 = 정렬이 안 어긋난다.)
+// 덩어리는 구분 기호(/ . , 。 、 공백 x)로 나뉘며, 그 덩어리가 발음되는 동안 계속 켜 둔다.
 // 타이밍: 합성 오디오엔 음소별 시각이 없으므로, 각 덩어리를 모라 수에 비례해 길이를 나눠 갖고,
 // 덩어리 사이 쉼(. ,)은 retimePauses의 실제 목표 길이(초)만큼 시간을 끼워 동기를 맞춘다.
 let hlSegs = null;     // [{ a, b, start }] — 칠할 덩어리 범위[a,b)와 시작시각(초), 텍스트 순
 let hlStart = 0;       // 재생 시작 시점의 ctx.currentTime
 let hlRAF = 0;         // requestAnimationFrame 핸들
 let hlActive = -1;     // 현재 칠해진 덩어리 인덱스(hlSegs 기준)
+let hlOn = false;      // 현재 div로 바꿔치기(하이라이트 표시) 중인가
 
 const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => HTML_ESC[c]);
@@ -128,31 +130,46 @@ function hlMora(ch) {
   return 0;                               // ' > < · 태그문자 등은 시간 없음
 }
 
-// backdrop 스크롤을 textarea에 맞춘다 (긴 텍스트로 칸이 스크롤될 때 어긋나지 않게)
-function syncHighlightScroll() {
-  kanaHlEl.style.transform = `translateY(${-kanaEl.scrollTop}px)`;
+// textarea → div 로 바꿔치기(같은 높이로 고정해 박스가 안 튀게)
+function showKanaView() {
+  if (hlOn) return;
+  kanaViewEl.style.height = kanaEl.offsetHeight + 'px';
+  kanaViewEl.scrollTop = kanaEl.scrollTop;
+  kanaEl.hidden = true;
+  kanaViewEl.hidden = false;
+  hlOn = true;
+}
+// div → textarea 로 되돌린다
+function hideKanaView() {
+  if (!hlOn) return;
+  kanaViewEl.hidden = true;
+  kanaEl.hidden = false;
+  kanaViewEl.textContent = '';
+  hlOn = false;
 }
 
-// hlSegs[k] 덩어리를 통째로 칠한 backdrop을 그린다. k<0이면 비운다.
+// hlSegs[k] 덩어리를 통째로 칠한 div를 그린다. k<0이면 강조 없이 본문만.
 function paintHighlight(k) {
   const text = kanaEl.value;
   if (k < 0 || !hlSegs || k >= hlSegs.length) {
-    kanaHlEl.textContent = '';
+    kanaViewEl.textContent = text;
   } else {
     const { a, b } = hlSegs[k];
-    kanaHlEl.innerHTML =
+    kanaViewEl.innerHTML =
       escapeHtml(text.slice(0, a)) +
       '<mark>' + escapeHtml(text.slice(a, b)) + '</mark>' +
       escapeHtml(text.slice(b));
+    const mark = kanaViewEl.querySelector('mark');
+    if (mark) mark.scrollIntoView({ block: 'nearest' }); // 긴 글이면 강조 부분으로 스크롤
   }
   hlActive = k;
-  syncHighlightScroll();
 }
 
 function clearHighlight() {
   if (hlRAF) { cancelAnimationFrame(hlRAF); hlRAF = 0; }
   hlSegs = null;
-  if (hlActive !== -1) paintHighlight(-1);
+  hlActive = -1;
+  hideKanaView();
 }
 
 // 가나 칸 텍스트를 덩어리로 나누고, 오디오 길이를 (덩어리 모라 비례 + 쉼 실시간)으로 분배해
@@ -209,11 +226,13 @@ function highlightTick() {
   hlRAF = requestAnimationFrame(highlightTick);
 }
 
-// 고급 재생이 막 시작될 때 호출 — 타임라인을 만들고 추적 루프를 건다.
+// 고급 재생이 막 시작될 때 호출 — div로 바꿔치기하고 타임라인·추적 루프를 건다.
 function startHighlight(duration, baseSpeed) {
   clearHighlight();
   buildHighlight(kanaEl.value, duration, baseSpeed);
   if (!hlSegs) return;
+  showKanaView();
+  paintHighlight(0);
   hlStart = audioCtx.currentTime;
   hlRAF = requestAnimationFrame(highlightTick);
 }
@@ -708,8 +727,6 @@ async function playKana(kana, btn) {
 textEl.addEventListener('input', regenerate);
 // 가나 칸을 직접 고치면 한국어 읽기 보조 표기도 따라 갱신
 kanaEl.addEventListener('input', updateKanaRead);
-// 칸이 스크롤되면 뒤의 하이라이트 backdrop도 같이 스크롤
-kanaEl.addEventListener('scroll', syncHighlightScroll);
 // 자동 / 토글 버튼: 켜고 끌 때마다 변환결과를 다시 만든다
 autoSlashBtn.addEventListener('click', () => {
   autoSlash = !autoSlash;
