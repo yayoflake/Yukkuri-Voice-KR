@@ -125,6 +125,7 @@ async function ensureVoice(voice) {
 //   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
 //   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
 //   > / <  : 현재 피치에서 한 단계(±1반음) 올림/내림(상대·누적). 예) >ユックリ< (올렸다 원위치)
+//   x      : 억양 초기화 경계. 。처럼 끊고 리셋하되 쉼 없이 이어 붙인다(단위별 따로 합성).
 // 태그가 없으면 전체가 슬라이더 속도·기본 피치다(기존과 동일).
 //
 // AquesTalk1엔 구간 속도·피치 기능이 없다. 구간마다 따로 합성하면 호출마다 억양이
@@ -316,6 +317,67 @@ function warpVocoder(x, g, p, sr) {
   return fin.subarray(0, fi);
 }
 
+// 한 합성 단위(x로 끊긴 한 덩어리)를 합성·후처리해 Float32로 돌려준다. (fade/pad/재생은 호출측)
+// 단위마다 따로 aq.run 하므로 AquesTalk 억양이 단위별로 리셋된다(= x의 "초기화").
+async function synthUnit(aq, ctx, unitKana, baseSpeed) {
+  const segs = parseSegments(unitKana, baseSpeed);
+  const fullKana = segs.map((s) => s.text).join('').trim();
+  if (!fullKana) return null;
+  await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
+  const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
+  const sr = decoded.sampleRate;
+  const data = trimEnds(decoded.getChannelData(0), sr);
+  // 구간을 모라 비례로 입력시각에 매핑해 표본별 피치(반음)·속도 파라미터를 만든다.
+  const weights = segs.map((s, i) =>
+    moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const M = data.length;
+  const semisArr = new Float32Array(M);
+  const tsArr = new Float32Array(M).fill(1);
+  let cum = 0, changed = false;
+  for (let i = 0; i < segs.length; i++) {
+    const startS = Math.round((cum / total) * M);
+    cum += weights[i];
+    const endS = i === segs.length - 1 ? M : Math.round((cum / total) * M);
+    const ts = baseSpeed / segs[i].speed;
+    for (let n = startS; n < endS; n++) { semisArr[n] = segs[i].semis; tsArr[n] = ts; }
+    if (segs[i].semis !== 0 || segs[i].speed !== baseSpeed) changed = true;
+  }
+  if (!changed) return data.slice(); // 태그 없음 → 원본 그대로
+  await new Promise((r) => setTimeout(r, 0)); // 무거운 변형 전 UI 양보
+  // 경계를 ~40ms 램프로 완만하게: 계단형 급변과 위상 불연속 제거
+  const win = Math.max(2, Math.round(sr * 0.04));
+  const sS = smooth(semisArr, win), tS = smooth(tsArr, win);
+  const p = new Float32Array(M), g = new Float32Array(M);
+  for (let n = 0; n < M; n++) { p[n] = Math.pow(2, sS[n] / 12); g[n] = p[n] * tS[n]; }
+  return warpVocoder(data, g, p, sr);
+}
+
+// x로 끊긴 단위들을 쉼 없이 이어붙인다. 각 단위의 끝/시작은 (정규화 테이퍼로) 잦아드므로
+// 등파워 크로스페이드로 겹쳐 틈·클릭 없이 매끄럽게 잇는다. (。와 달리 무음을 안 넣는다)
+function concatUnits(parts, sr) {
+  parts = parts.filter((p) => p && p.length);
+  if (parts.length === 0) return new Float32Array(0);
+  if (parts.length === 1) return parts[0];
+  const fade = Math.round(sr * 0.025); // 25ms 겹침
+  let cap = 0; for (const p of parts) cap += p.length;
+  const out = new Float32Array(cap);
+  out.set(parts[0], 0);
+  let pos = parts[0].length;
+  for (let i = 1; i < parts.length; i++) {
+    const s = parts[i];
+    const f = Math.min(fade, pos, s.length);
+    const start = pos - f;
+    for (let j = 0; j < f; j++) {
+      const t = (j + 0.5) / f;
+      out[start + j] = out[start + j] * Math.cos(t * Math.PI / 2) + s[j] * Math.sin(t * Math.PI / 2);
+    }
+    out.set(s.subarray(f), start + f);
+    pos = start + f + (s.length - f);
+  }
+  return out.slice(0, pos);
+}
+
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
 // 준비/합성 중이면 무시, 재생 중인 같은 버튼을 다시 누르면 정지, 다른 버튼이면 멈추고 새로 재생.
 async function playKana(kana, btn) {
@@ -342,54 +404,25 @@ async function playKana(kana, btn) {
   activeBtn = btn;
   setPlayUI(btn, 'loading');
 
-  // 1) 음성 로드 + 단일 합성 + 구간별 후처리 (실제 실패가 날 수 있는 구간)
+  // 1) 음성 로드 + (x로 끊긴) 단위별 합성·후처리 후 이어붙이기 (실제 실패가 날 수 있는 구간)
   let buffer;
   try {
     const aq = await ensureVoice(voiceEl.value);
     const ctx = getCtx();
     if (ctx.state === 'suspended') await ctx.resume();
     const baseSpeed = Number(speedEl.value);
-    const segs = parseSegments(kana, baseSpeed);
-    const fullKana = segs.map((s) => s.text).join('').trim();
-    if (!fullKana) throw new Error('읽을 가나가 없음');
+    const sr = ctx.sampleRate;
 
-    // ① 태그 뺀 전체를 한 번에 합성 → 연속 억양. 앞뒤 무음만 떼낸다.
-    await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
-    const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
-    const sr = decoded.sampleRate;
-    const data = trimEnds(decoded.getChannelData(0), sr);
-
-    // ② 구간을 모라 비례로 입력시각에 매핑해, 표본별 피치(반음)·속도 파라미터를 만든다.
-    // 맨 끝의 쉼(。、)·공백은 trimEnds로 잘려 오디오에 없으니 가중치에서 뺀다(분모 부풀어 경계가
-    // 일찍 떨어지는 것 방지). 내부 쉼은 오디오에 남아 그대로 센다.
-    const weights = segs.map((s, i) =>
-      moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
-    const total = weights.reduce((a, b) => a + b, 0) || 1;
-    const M = data.length;
-    const semisArr = new Float32Array(M);   // 표본별 반음
-    const tsArr = new Float32Array(M).fill(1); // 표본별 시간축(=baseSpeed/속도)
-    let cum = 0, changed = false;
-    for (let i = 0; i < segs.length; i++) {
-      const startS = Math.round((cum / total) * M);
-      cum += weights[i];
-      const endS = i === segs.length - 1 ? M : Math.round((cum / total) * M);
-      const ts = baseSpeed / segs[i].speed;
-      for (let n = startS; n < endS; n++) { semisArr[n] = segs[i].semis; tsArr[n] = ts; }
-      if (segs[i].semis !== 0 || segs[i].speed !== baseSpeed) changed = true;
+    // x(초기화·무쉼 경계)로 합성 단위를 나눈다. 단위마다 따로 합성해 억양을 리셋하고,
+    // 쉼 없이 크로스페이드로 잇는다. x가 없으면 단위 하나(기존과 동일).
+    const units = kana.split(/[xXｘＸ]/);
+    const parts = [];
+    for (const u of units) {
+      const m = await synthUnit(aq, ctx, u, baseSpeed);
+      if (m && m.length) parts.push(m);
     }
-
-    let merged;
-    if (!changed) {
-      merged = data.slice(); // 태그 없음 → 원본 그대로 (끝 페이드만)
-    } else {
-      await new Promise((r) => setTimeout(r, 0)); // 무거운 변형 전 UI 양보
-      // 경계를 ~40ms 램프로 완만하게: 계단형 급변과 위상 불연속 제거
-      const win = Math.max(2, Math.round(sr * 0.04));
-      const sS = smooth(semisArr, win), tS = smooth(tsArr, win);
-      const p = new Float32Array(M), g = new Float32Array(M);
-      for (let n = 0; n < M; n++) { p[n] = Math.pow(2, sS[n] / 12); g[n] = p[n] * tS[n]; }
-      merged = warpVocoder(data, g, p, sr);
-    }
+    const merged = concatUnits(parts, sr);
+    if (!merged.length) throw new Error('읽을 가나가 없음');
     fadeEdges(merged, sr); // 시작/끝 클릭 방지
 
     // 끝에 무음 패딩 — 자연 종료(자동 정지)의 노드 해제·스트림 닫힘이 무음 구간에서
