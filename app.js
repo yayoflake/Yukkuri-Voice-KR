@@ -323,7 +323,10 @@ async function playKana(kana, btn) {
     const data = trimEnds(decoded.getChannelData(0), sr);
 
     // ② 구간을 모라 비례로 시간 슬라이스 → 속도/피치 다른 구간만 보코더로 변형
-    const weights = segs.map((s) => moraSum(s.text));
+    // 맨 끝의 쉼(。、)·공백은 trimEnds로 잘려 오디오에 없으니 가중치에서 뺀다
+    // (안 그러면 분모가 부풀어 앞 구간 경계가 너무 일찍 떨어짐). 내부 쉼은 오디오에 남아 그대로 센다.
+    const weights = segs.map((s, i) =>
+      moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
     const total = weights.reduce((a, b) => a + b, 0) || 1;
     const M = data.length;
     const items = [];
