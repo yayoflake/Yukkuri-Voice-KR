@@ -133,6 +133,7 @@ function tokenize(text) {
   const tokens = [];
   let lastSyl = null;          // 운율 기호(' / -)를 붙일 직전 음절 토큰
   let pendingBoundary = false; // 직전에 공백이 있었나 (다음 음절을 새 어절로 표시)
+  const prevSep = () => { const p = tokens[tokens.length - 1]; return p && p.type === 'sep' ? p : null; };
   for (const ch of text) {
     const code = ch.codePointAt(0);
     if (code >= HANGUL_BASE && code <= HANGUL_LAST) {
@@ -163,28 +164,38 @@ function tokenize(text) {
       tokens.push({ type: 'raw', kana: '/' });
       lastSyl = null;
       pendingBoundary = false;
+    } else if (ch === '\n' || ch === '\r') {
+      // 줄바꿈은 마침표 . 로 변환한다(재생 시 。 쉼이 됨). 연속 줄바꿈(빈 줄)이어도
+      // 앞이 이미 . 로 끝나는 구두점(. 이나 ?.)이면 중복 생성하지 않는다.
+      const prev = prevSep();
+      if (!(prev && prev.kana.endsWith('.'))) tokens.push({ type: 'sep', kana: '.' });
+      lastSyl = null;
+      pendingBoundary = false;
     } else if (/\s/.test(ch)) {
-      // 공백·줄바꿈은 모두 어절 경계로만 본다(。을 만들지 않는다 — 빈 줄이 。가 되던 문제).
-      // 다음 음절에 boundaryBefore를 달아
+      // 일반 공백(스페이스·탭)은 어절 경계로만 본다. 다음 음절에 boundaryBefore를 달아
       // 연음을 절음(받침→대표음 후 연음)으로 처리하고(샤인머스캣 알아 → …ケダラ),
       // ㅎ약화는 막으며, 연음으로 안 묶인 경계엔 악센트구 구분자 / 를 넣는다.
       pendingBoundary = true;
       continue;
     } else if (ch === '?' || ch === '？') {
-      // 물음표: AquesTalk1의 올림(의문) 억양 기호 ? 로 보존한다. (변환값에도 ? 가 들어가야 함)
-      // 연속(??)은 단일 ? 로 합친다.
-      const prev = tokens[tokens.length - 1];
-      if (!(prev && prev.type === 'sep' && prev.kana === '?')) tokens.push({ type: 'sep', kana: '?' });
+      // 물음표는 ?. 로 변환한다. ? 만으론 억양이 올랐다 바로 내려 문장이 끊긴 느낌이 없어
+      // 뒤에 .(재생 시 。 쉼)을 더해 의문 억양 + 쉼을 함께 준다.
+      // 연속(??)은 단일 ?. 로, 바로 앞이 마침표면 의문 억양으로 승격(.? → ?.)한다.
+      const prev = prevSep();
+      if (prev && prev.kana === '?.') { /* 중복 ? 무시 */ }
+      else if (prev && prev.kana === '.') prev.kana = '?.';
+      else tokens.push({ type: 'sep', kana: '?.' });
       lastSyl = null;
       pendingBoundary = false;
     } else if ('.!…。！'.includes(ch)) {
-      // 마침표류는 모두 단일 쉼 。 으로. 연속(... 등)은 중복 없이 하나의 。 로 합친다.
-      const prev = tokens[tokens.length - 1];
-      if (!(prev && prev.type === 'sep' && prev.kana === '。')) tokens.push({ type: 'sep', kana: '。' });
+      // 마침표류는 모두 . 로 변환한다(재생 시 。 쉼). 연속(... 등)이나 ?. 뒤면 중복 생성하지 않는다.
+      const prev = prevSep();
+      if (!(prev && prev.kana.endsWith('.'))) tokens.push({ type: 'sep', kana: '.' });
       lastSyl = null;
       pendingBoundary = false;
     } else if (',、·､'.includes(ch)) {
-      tokens.push({ type: 'sep', kana: '、' });
+      // 쉼표류는 , 로 변환한다(재생 시 、 짧은 쉼).
+      tokens.push({ type: 'sep', kana: ',' });
       lastSyl = null;
       pendingBoundary = false;
     }
