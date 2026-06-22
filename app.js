@@ -27,9 +27,13 @@ const VOICES_BASE = new URL('voices/', document.baseURI).href;
 // 현재 로드된 AquesTalk 인스턴스 (음성당 ~1GB라 한 번에 하나만 유지)
 let current = null;        // { voice, aq }
 let busy = false;          // 로드/합성 중 (이때 버튼은 잠금)
-let currentAudio = null;   // 재생 중인 Audio (있으면 = 재생 중)
-let lastUrl = null;
+let audioCtx = null;       // Web Audio 컨텍스트 (구간 합성 결과를 이어붙여 재생)
+let currentSource = null;  // 재생 중인 BufferSource (있으면 = 재생 중)
 let activeBtn = null;      // 재생/준비 UI를 표시 중인 버튼 (위/아래)
+
+function getCtx() {
+  return (audioCtx ??= new (window.AudioContext || window.webkitAudioContext)());
+}
 
 // 재생창 밑 메시지: 오류만 붉은글씨로 표시. btn에 따라 위/아래 메시지 칸을 고른다.
 // (재생중/재생완료 같은 상태는 재생 버튼의 표시가 대신하므로 메시지로 띄우지 않는다)
@@ -59,13 +63,12 @@ function resetPlayUI() {
 
 // 재생 중지 + 리소스 정리
 function stopPlayback() {
-  if (currentAudio) {
-    currentAudio.onended = null;
-    currentAudio.pause();
-    currentAudio.src = '';
-    currentAudio = null;
+  if (currentSource) {
+    currentSource.onended = null;
+    try { currentSource.stop(); } catch { /* 이미 끝남 */ }
+    currentSource.disconnect();
+    currentSource = null;
   }
-  if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
 }
 
 // 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
@@ -104,11 +107,61 @@ async function ensureVoice(voice) {
   return aq;
 }
 
+// ── 구간별 속도 ───────────────────────────────────────────────────
+// 가나 칸에 [속도] 태그를 넣으면 그 자리부터 다음 태그까지 다른 속도로 읽는다.
+//   예) [120]オハヨ[250]ゴザイマス  → 앞은 느리게, 뒤는 빠르게
+// 태그가 없으면 전체가 슬라이더 속도 한 구간이 된다(기존과 동일).
+// AquesTalk1엔 구간 속도 기능이 없어, 구간마다 따로 합성한 뒤 무음을 떼고 이어붙인다.
+function clampSpeed(v) { return Math.min(300, Math.max(50, v | 0)); }
+
+function parseSpeedSegments(kana, defaultSpeed) {
+  const parts = kana.split(/\[(\d{1,3})\]/); // [텍스트, 숫자, 텍스트, 숫자, …]
+  const segs = [];
+  let speed = defaultSpeed;
+  const push = (t) => { const k = (t || '').trim(); if (k) segs.push({ kana: k, speed }); };
+  push(parts[0]);
+  for (let i = 1; i < parts.length; i += 2) { speed = clampSpeed(Number(parts[i])); push(parts[i + 1]); }
+  return segs;
+}
+
+// aq.run 결과(WAV 바이트)를 decodeAudioData가 받는 ArrayBuffer로.
+function toArrayBuffer(wav) {
+  if (wav instanceof ArrayBuffer) return wav;
+  return wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength);
+}
+
+// AquesTalk가 구간마다 앞뒤에 붙이는 무음을 떼어 이어붙일 때 텀이 안 생기게 한다.
+// (자연스러운 쉼은 구간 안의 、。로 표현되므로 구간 경계 무음만 제거)
+function trimSilence(buf, ctx) {
+  const data = buf.getChannelData(0);
+  const n = data.length, thr = 0.004;
+  let s = 0, e = n;
+  while (s < n && Math.abs(data[s]) < thr) s++;
+  while (e > s && Math.abs(data[e - 1]) < thr) e--;
+  const margin = Math.round(ctx.sampleRate * 0.005); // 클릭 방지용 5ms 여유
+  s = Math.max(0, s - margin);
+  e = Math.min(n, e + margin);
+  if (e <= s) return null; // 전부 무음
+  const out = ctx.createBuffer(1, e - s, ctx.sampleRate);
+  out.copyToChannel(data.subarray(s, e), 0);
+  return out;
+}
+
+function concatBuffers(buffers, ctx) {
+  const total = buffers.reduce((a, b) => a + b.length, 0);
+  if (total === 0) return null;
+  const out = ctx.createBuffer(1, total, ctx.sampleRate);
+  const od = out.getChannelData(0);
+  let off = 0;
+  for (const b of buffers) { od.set(b.getChannelData(0), off); off += b.length; }
+  return out;
+}
+
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
 // 준비/합성 중이면 무시, 재생 중인 같은 버튼을 다시 누르면 정지, 다른 버튼이면 멈추고 새로 재생.
 async function playKana(kana, btn) {
   if (busy) return;
-  if (currentAudio) {
+  if (currentSource) {
     const wasActive = activeBtn === btn;
     stopPlayback();
     resetPlayUI();
@@ -116,7 +169,7 @@ async function playKana(kana, btn) {
   }
 
   // 합성용으로 가타카나로 정규화하고, 운율 보조 표기(' / 하이픈→장음 ー)도
-  // AquesTalk1이 받는 형태로 정리한다.
+  // AquesTalk1이 받는 형태로 정리한다. ([속도] 태그는 ASCII라 정규화에 안 걸림)
   kana = normalizeProsody(hiraToKata(kana)).trim();
   if (!kana) { setError(btn, '가나가 비어 있음'); return; }
 
@@ -125,12 +178,21 @@ async function playKana(kana, btn) {
   activeBtn = btn;
   setPlayUI(btn, 'loading');
 
-  // 1) 음성 로드 + 합성 (실제 실패가 날 수 있는 구간)
-  let wav;
+  // 1) 음성 로드 + 구간별 합성 (실제 실패가 날 수 있는 구간)
+  let buffer;
   try {
     const aq = await ensureVoice(voiceEl.value);
-    await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
-    wav = aq.run(kana, Number(speedEl.value));
+    const ctx = getCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const segs = parseSpeedSegments(kana, Number(speedEl.value));
+    const buffers = [];
+    for (const seg of segs) {
+      await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
+      const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, seg.speed)));
+      const trimmed = trimSilence(decoded, ctx);
+      if (trimmed) buffers.push(trimmed);
+    }
+    buffer = concatBuffers(buffers, ctx);
   } catch (e) {
     console.error(e);
     busy = false;
@@ -139,22 +201,18 @@ async function playKana(kana, btn) {
     return;
   }
   busy = false;
+  if (!buffer) { setError(btn, '합성 결과가 비어 있음'); resetPlayUI(); return; }
 
   // 2) 재생 시작
   stopPlayback(); // 혹시 남은 것 정리
-  lastUrl = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
-  const audio = new Audio(lastUrl);
-  currentAudio = audio;
-  audio.onended = () => { stopPlayback(); resetPlayUI(); };
+  const ctx = getCtx();
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  currentSource = src;
+  src.onended = () => { if (currentSource === src) { stopPlayback(); resetPlayUI(); } };
   setPlayUI(btn, 'playing');
-  audio.play().catch((e) => {
-    // 정지(stopPlayback)로 인한 중단(AbortError)은 정상이므로 무시
-    if (e && e.name === 'AbortError') return;
-    console.error(e);
-    stopPlayback();
-    setError(btn, '재생 오류: ' + (e?.message || e));
-    resetPlayUI();
-  });
+  src.start();
 }
 
 textEl.addEventListener('input', regenerate);
@@ -173,7 +231,7 @@ playBtn.addEventListener('click', () => playKana(koreanKana(), playBtn));
 // 아래쪽(고급): 가나 칸을 그대로(직접 넣은 ' / 포함) 재생
 playKanaBtn.addEventListener('click', () => playKana(kanaEl.value, playKanaBtn));
 // 음성을 바꾸면 재생 중인 소리는 멈춤
-voiceEl.addEventListener('change', () => { if (currentAudio) { stopPlayback(); resetPlayUI(); } });
+voiceEl.addEventListener('change', () => { if (currentSource) { stopPlayback(); resetPlayUI(); } });
 
 // ── 가나 키보드 ───────────────────────────────────────────────────
 // 청음/탁음·반탁음/작은가나·기호를 탭으로 나눠 한 화면당 키 수를 줄이고 키를 키운다.
