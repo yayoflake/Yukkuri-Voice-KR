@@ -149,8 +149,8 @@ function clampSemis(v) { return Math.min(12, Math.max(-12, v | 0)); }
 // 모라 수(박자) 추정용 가중치. 시간 슬라이스 위치를 모라 비례로 잡는 데 쓴다.
 const SMALL_KANA = 'ァィゥェォャュョ';
 function moraWeight(ch) {
-  if (ch === '。') return 3;    // 긴 쉼
-  if (ch === '、') return 1.5;  // 짧은 쉼
+  if (ch === '。') return 1.4;  // 쉼(shrinkPauses로 줄인 길이에 맞춤)
+  if (ch === '、') return 0.6;  // 짧은 쉼
   if (ch === 'ー') return 1;    // 장음 +1박
   if (SMALL_KANA.includes(ch)) return 0; // 작은가나는 앞 글자와 한 모라
   if (/[ァ-ヶ]/.test(ch)) return 1;       // 일반 가타카나 1모라 (ッ ン 포함)
@@ -198,6 +198,30 @@ function trimEnds(data, sr) {
   s = Math.max(0, s - margin);
   e = Math.min(n, e + margin);
   return e > s ? data.subarray(s, e) : data.subarray(0, 0);
+}
+
+// AquesTalk가 ,(、)·.(。)에 넣는 쉼이 길어서, 내부 무음 구간을 factor배로 줄인다.
+// (촉음 등 짧은 무음은 minGap 미만이라 안 건드림. 억양은 그대로, 무음 길이만 압축)
+function shrinkPauses(data, sr, factor = 0.35, minSec = 0.1) {
+  const thr = 0.004, n = data.length, minGap = Math.round(sr * minSec);
+  const segs = []; // 남길 구간 [start,end)
+  for (let i = 0; i < n;) {
+    let j = i;
+    if (Math.abs(data[i]) < thr) {
+      while (j < n && Math.abs(data[j]) < thr) j++;
+      const gap = j - i;
+      segs.push([i, i + (gap >= minGap ? Math.round(gap * factor) : gap)]);
+    } else {
+      while (j < n && Math.abs(data[j]) >= thr) j++;
+      segs.push([i, j]);
+    }
+    i = j;
+  }
+  let total = 0; for (const [a, b] of segs) total += b - a;
+  if (total === n) return data; // 줄일 무음 없음
+  const out = new Float32Array(total);
+  let off = 0; for (const [a, b] of segs) { out.set(data.subarray(a, b), off); off += b - a; }
+  return out;
 }
 
 // ── DSP: FFT · 위상 보코더 · 리샘플 ──────────────────────────────
@@ -337,7 +361,7 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed) {
   await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
   const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
   const sr = decoded.sampleRate;
-  const data = trimEnds(decoded.getChannelData(0), sr);
+  const data = shrinkPauses(trimEnds(decoded.getChannelData(0), sr), sr);
   // 구간을 모라 비례로 입력시각에 매핑해 표본별 피치(반음)·속도 파라미터를 만든다.
   const weights = segs.map((s, i) =>
     moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
@@ -366,8 +390,8 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed) {
 
 // 쉼 부호 1개의 길이(초). x 경계에선 쉼을 명시적 무음으로 바꿔 넣는다(아래 참고).
 function pauseSec(ch) {
-  if (ch === '。' || ch === '.') return 0.34;
-  if (ch === '、' || ch === ',') return 0.18;
+  if (ch === '。' || ch === '.') return 0.18;
+  if (ch === '、' || ch === ',') return 0.08;
   return 0;
 }
 
