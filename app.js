@@ -201,9 +201,9 @@ function trimEnds(data, sr) {
 }
 
 // AquesTalk가 ,(、)·.(。)에 넣는 쉼을 부호별 목표 길이로 다시 잡는다(,는 짧게·.는 살짝 길게).
-// 핵심: 합성 오디오엔 쉼 무음 말고도 촉음(ッ) 무음이 섞여 있다. 개수로 매칭하면 ッ 때문에
-// 어긋나므로(이전 버그: ,=. 동일), 각 쉼 부호의 "모라 비례 기대 위치"에 가장 가까운 무음을
-// 지목해 그것만 목표 길이로 조정한다. ッ 무음은 위치가 안 맞아 건드려지지 않는다.
+// 핵심: 합성 오디오엔 쉼 무음 말고도 촉음(ッ) 무음이 섞여 있다. 쉼 무음은 촉음보다 길므로
+// "가장 긴 N개"를 쉼으로 지목하고(N=쉼 묶음 수), 위치 순서대로 부호에 대응시킨다. 촉음 무음은
+// 더 짧아 선택되지 않아 보존된다. (개수·위치 추정 방식은 촉음·긴쉼에서 어긋나 버그가 났음)
 const PAUSE_TARGET = { '、': 0.045, '。': 0.24 };
 function retimePauses(data, sr, fullKana) {
   const n = data.length, thr = 0.004, minGap = Math.round(sr * 0.05);
@@ -215,25 +215,22 @@ function retimePauses(data, sr, fullKana) {
     i = j;
   }
   if (!gaps.length) return data;
-  // 쉼 부호의 기대 위치(샘플) = 모라 누적 비례
-  const total = moraSum(fullKana) || 1;
-  const marks = []; let cum = 0;
-  for (const ch of fullKana) {
-    if (ch === '、' || ch === '。') marks.push({ pos: (cum / total) * n, sec: PAUSE_TARGET[ch] });
-    cum += moraWeight(ch);
+  // 쉼 묶음별 목표 길이(초), 텍스트 순서. 연속 쉼(.. ,, 등)은 AquesTalk가 무음 1개(N배 길이)로
+  // 합쳐 내므로 마크도 하나로 묶고 목표를 합산한다(...→0.72s).
+  const marks = [];
+  for (let idx = 0; idx < fullKana.length; idx++) {
+    const ch = fullKana[idx], prev = fullKana[idx - 1];
+    if (ch === '、' || ch === '。') {
+      if (marks.length && (prev === '、' || prev === '。')) marks[marks.length - 1] += PAUSE_TARGET[ch];
+      else marks.push(PAUSE_TARGET[ch]);
+    }
   }
   if (!marks.length) return data;
-  // 각 부호를 가장 가까운(미사용) 무음에 매칭 (너무 멀면 매칭 안 함)
-  const tol = n * 0.2, used = new Array(gaps.length).fill(false), target = new Map();
-  for (const mk of marks) {
-    let best = -1, bd = Infinity;
-    for (let gi = 0; gi < gaps.length; gi++) {
-      if (used[gi]) continue;
-      const d = Math.abs((gaps[gi][0] + gaps[gi][1]) / 2 - mk.pos);
-      if (d < bd) { bd = d; best = gi; }
-    }
-    if (best >= 0 && bd <= tol) { used[best] = true; target.set(best, mk.sec); }
-  }
+  // 가장 긴 무음 N개 = 쉼(촉음보다 김). 위치 순으로 정렬해 부호(텍스트 순)와 1:1 대응.
+  const byLen = [...gaps.keys()].sort((a, b) => (gaps[b][1] - gaps[b][0]) - (gaps[a][1] - gaps[a][0]));
+  const pauseIdx = byLen.slice(0, marks.length).sort((a, b) => a - b);
+  const target = new Map();
+  pauseIdx.forEach((gi, k) => target.set(gi, marks[k]));
   if (!target.size) return data;
   // 재조립: 매칭된 무음만 목표 길이로 줄이고, 나머지(촉음 등)는 그대로 둔다
   const pieces = []; let prev = 0;
