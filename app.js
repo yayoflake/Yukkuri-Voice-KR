@@ -266,18 +266,27 @@ function processSlice(slice, timeScale, p) {
   return p === 1 ? stretched : resampleArray(stretched, p);
 }
 
-// 슬라이스들을 이어붙인다. 변형된 경계엔 짧은 크로스페이드로 클릭을 막는다.
-function concatSlices(items, fade) {
+// 슬라이스들을 이어붙인다. 변형된(피치/속도 다른) 경계는 위상이 안 맞아 클릭이 나므로
+// 길고 부드러운 등파워(constant-power) 크로스페이드로 섞는다. 변형 안 한 경계는 원래
+// 연속이라 그냥 맞붙인다(fade 0). 짧은 슬라이스에선 길이에 맞춰 fade가 줄어든다.
+function concatSlices(items, sr) {
   if (!items.length) return new Float32Array(0);
+  const maxFade = Math.round(sr * 0.015); // 15ms
   let cap = 0; for (const it of items) cap += it.data.length;
   const out = new Float32Array(cap);
   out.set(items[0].data, 0);
   let pos = items[0].data.length;
   for (let i = 1; i < items.length; i++) {
     const s = items[i].data;
-    const f = Math.min((items[i - 1].processed || items[i].processed) ? fade : 0, pos, s.length);
+    const want = (items[i - 1].processed || items[i].processed) ? maxFade : 0;
+    const f = Math.min(want, pos, s.length);
     const start = pos - f;
-    for (let j = 0; j < f; j++) { const t = j / f; out[start + j] = out[start + j] * (1 - t) + s[j] * t; }
+    for (let j = 0; j < f; j++) {
+      const t = (j + 0.5) / f;            // 0..1
+      const a = Math.cos(t * Math.PI / 2); // 등파워: a²+b²=1 (진폭 함몰/클릭 방지)
+      const b = Math.sin(t * Math.PI / 2);
+      out[start + j] = out[start + j] * a + s[j] * b;
+    }
     out.set(s.subarray(f), start + f);
     pos = start + f + (s.length - f);
   }
@@ -343,7 +352,7 @@ async function playKana(kana, btn) {
       if (processed) await new Promise((r) => setTimeout(r, 0));
       items.push({ data: processed ? processSlice(slice, timeScale, p) : slice, processed });
     }
-    const merged = concatSlices(items, Math.round(sr * 0.004));
+    const merged = concatSlices(items, sr);
     buffer = merged.length ? ctx.createBuffer(1, merged.length, sr) : null;
     if (buffer) buffer.copyToChannel(merged, 0);
   } catch (e) {
