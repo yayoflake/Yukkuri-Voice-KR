@@ -170,8 +170,17 @@ function tokenize(text) {
       // ㅎ약화는 막으며, 연음으로 안 묶인 경계엔 악센트구 구분자 / 를 넣는다.
       pendingBoundary = true;
       continue;
-    } else if ('.!?…。！？'.includes(ch)) {
-      tokens.push({ type: 'sep', kana: '。' });
+    } else if (ch === '?' || ch === '？') {
+      // 물음표: AquesTalk1의 올림(의문) 억양 기호 ? 로 보존한다. (변환값에도 ? 가 들어가야 함)
+      // 연속(??)은 단일 ? 로 합친다.
+      const prev = tokens[tokens.length - 1];
+      if (!(prev && prev.type === 'sep' && prev.kana === '?')) tokens.push({ type: 'sep', kana: '?' });
+      lastSyl = null;
+      pendingBoundary = false;
+    } else if ('.!…。！'.includes(ch)) {
+      // 마침표류는 모두 단일 쉼 。 으로. 연속(... 등)은 중복 없이 하나의 。 로 합친다.
+      const prev = tokens[tokens.length - 1];
+      if (!(prev && prev.type === 'sep' && prev.kana === '。')) tokens.push({ type: 'sep', kana: '。' });
       lastSyl = null;
       pendingBoundary = false;
     } else if (',、·､'.includes(ch)) {
