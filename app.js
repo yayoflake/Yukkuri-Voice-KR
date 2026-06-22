@@ -419,9 +419,10 @@ async function playKana(kana, btn) {
 
   // 합성용으로 가타카나로 정규화하고, 운율 보조 표기(' / 하이픈→장음 ー)도
   // AquesTalk1이 받는 형태로 정리한다. ([속도] 태그는 ASCII라 정규화에 안 걸림)
-  // 변환결과 칸은 , 를 ASCII로 보여주지만, 실제 합성은 AquesTalk1 쉼 기호 、 로 바꿔 넣는다.
+  // 변환결과 칸은 . , 를 ASCII로 보여주지만, 실제 합성은 AquesTalk1 쉼 기호 。 、 로 바꿔 넣는다.
   // 공백문자(스페이스·탭·줄바꿈)는 합성에서 의미가 없으므로 모두 제거한다.
   kana = normalizeProsody(hiraToKata(kana))
+    .replace(/\./g, '。')
     .replace(/,/g, '、')
     .replace(/\s+/g, '')
     .trim();
