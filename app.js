@@ -203,12 +203,20 @@ const KB_SMALL = [
   ["'", '、', '。', '⌫', ''],
 ];
 
-const KB_TABS = [['청음', KB_BASE], ['탁음·반탁음', KB_DAKU], ['작은가나·기호', KB_SMALL]];
+const KB_TABS = [['청음', KB_BASE], ['탁음·반탁음', KB_DAKU], ['스테가나·기호', KB_SMALL]];
 const kbGrids = [];
 
-// 버튼 아래에 보조로 띄울 한글 발음. 한글 음절로 떨어지는 가나만 표기하고
-// 받침용 가나(ン/ッ)·작은가나·기호는 발음 칸을 비운다.
+// 단독으로 한글 한 음절이 안 되는 가나는 교재에서 통용되는 표기로 보여 준다.
+//   ン→응, ッ→촉음, ー→장음, 스테가나(작은 가나)는 그 가나가 내는 모음/요음으로.
+const KANA_READ_OVERRIDE = {
+  'ン': '응', 'ッ': '촉음', 'ー': '장음',
+  'ァ': '아', 'ィ': '이', 'ゥ': '우', 'ェ': '에', 'ォ': '오',
+  'ャ': '야', 'ュ': '유', 'ョ': '요',
+};
+
+// 버튼 아래에 보조로 띄울 한글 발음. 운율·구분 기호(' 、 。 ⌫)는 비워 둔다.
 function kanaReading(ch) {
+  if (ch in KANA_READ_OVERRIDE) return KANA_READ_OVERRIDE[ch];
   const r = katakanaToKorean(ch);
   return /^[가-힣]+$/.test(r) ? r : '';
 }
