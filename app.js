@@ -107,21 +107,56 @@ async function ensureVoice(voice) {
   return aq;
 }
 
-// ── 구간별 속도 ───────────────────────────────────────────────────
-// 가나 칸에 [속도] 태그를 넣으면 그 자리부터 다음 태그까지 다른 속도로 읽는다.
-//   예) [120]オハヨ[250]ゴザイマス  → 앞은 느리게, 뒤는 빠르게
-// 태그가 없으면 전체가 슬라이더 속도 한 구간이 된다(기존과 동일).
-// AquesTalk1엔 구간 속도 기능이 없어, 구간마다 따로 합성한 뒤 무음을 떼고 이어붙인다.
+// ── 구간별 속도·피치 ──────────────────────────────────────────────
+// 가나 칸 태그로 그 자리부터 다음 같은 태그까지 속도/피치를 바꾼다.
+//   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
+//   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
+// 태그가 없으면 전체가 슬라이더 속도·기본 피치 한 구간이다(기존과 동일).
+// AquesTalk1엔 구간 속도·피치 기능이 없어 구간마다 따로 합성한 뒤 무음을 떼고 이어붙인다.
 function clampSpeed(v) { return Math.min(300, Math.max(50, v | 0)); }
+function clampSemis(v) { return Math.min(12, Math.max(-12, v | 0)); }
 
-function parseSpeedSegments(kana, defaultSpeed) {
-  const parts = kana.split(/\[(\d{1,3})\]/); // [텍스트, 숫자, 텍스트, 숫자, …]
+function parseSegments(kana, defaultSpeed) {
+  const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}/g;
   const segs = [];
-  let speed = defaultSpeed;
-  const push = (t) => { const k = (t || '').trim(); if (k) segs.push({ kana: k, speed }); };
-  push(parts[0]);
-  for (let i = 1; i < parts.length; i += 2) { speed = clampSpeed(Number(parts[i])); push(parts[i + 1]); }
+  let speed = defaultSpeed, semis = 0, last = 0, m;
+  const push = (t) => { const k = (t || '').trim(); if (k) segs.push({ kana: k, speed, semis }); };
+  while ((m = re.exec(kana)) !== null) {
+    push(kana.slice(last, m.index));
+    if (m[1] !== undefined) speed = clampSpeed(Number(m[1]));
+    else semis = clampSemis(Number(m[2]));
+    last = re.lastIndex;
+  }
+  push(kana.slice(last));
   return segs;
+}
+
+// 선형보간 리샘플: ratio>1이면 r배 빨리 읽어 피치↑·길이↓ (피치 야매의 시간축 압축용).
+function resample(buf, ratio, ctx) {
+  const src = buf.getChannelData(0);
+  const n = src.length;
+  const outLen = Math.max(1, Math.round(n / ratio));
+  const out = ctx.createBuffer(1, outLen, ctx.sampleRate);
+  const od = out.getChannelData(0);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio, i0 = Math.floor(pos), frac = pos - i0;
+    const a = src[i0] ?? 0;
+    const b = src[i0 + 1] ?? a;
+    od[i] = a + (b - a) * frac;
+  }
+  return out;
+}
+
+// 한 구간을 합성한다. 피치(semis)가 있으면 varispeed 보정으로 길이를 보존한다.
+//   목표 피치 ×r 을 위해: ① AquesTalk를 speed/r 로 (느리게=길게) 합성하고
+//   ② 리샘플로 r배 압축 → 길이는 speed 기준 그대로, 피치만 ×r.
+//   (AquesTalk 속도는 피치를 안 바꾸므로 시간축은 엔진이, 피치는 리샘플이 담당)
+async function synthSegment(aq, seg, ctx) {
+  if (seg.semis === 0) return ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, seg.speed)));
+  const ratio = Math.pow(2, seg.semis / 12);
+  const synthSpeed = clampSpeed(Math.round(seg.speed / ratio));
+  const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, synthSpeed)));
+  return resample(decoded, ratio, ctx);
 }
 
 // aq.run 결과(WAV 바이트)를 decodeAudioData가 받는 ArrayBuffer로.
@@ -184,12 +219,11 @@ async function playKana(kana, btn) {
     const aq = await ensureVoice(voiceEl.value);
     const ctx = getCtx();
     if (ctx.state === 'suspended') await ctx.resume();
-    const segs = parseSpeedSegments(kana, Number(speedEl.value));
+    const segs = parseSegments(kana, Number(speedEl.value));
     const buffers = [];
     for (const seg of segs) {
       await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
-      const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, seg.speed)));
-      const trimmed = trimSilence(decoded, ctx);
+      const trimmed = trimSilence(await synthSegment(aq, seg, ctx), ctx);
       if (trimmed) buffers.push(trimmed);
     }
     buffer = concatBuffers(buffers, ctx);
