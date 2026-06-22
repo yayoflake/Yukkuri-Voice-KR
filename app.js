@@ -111,16 +111,34 @@ async function ensureVoice(voice) {
 // 가나 칸 태그로 그 자리부터 다음 같은 태그까지 속도/피치를 바꾼다.
 //   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
 //   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
-// 태그가 없으면 전체가 슬라이더 속도·기본 피치 한 구간이다(기존과 동일).
-// AquesTalk1엔 구간 속도·피치 기능이 없어 구간마다 따로 합성한 뒤 무음을 떼고 이어붙인다.
+// 태그가 없으면 전체가 슬라이더 속도·기본 피치다(기존과 동일).
+//
+// AquesTalk1엔 구간 속도·피치 기능이 없다. 구간마다 따로 합성하면 호출마다 억양이
+// 리셋돼 "문장이 끊긴다". 그래서 ① 태그를 다 떼고 전체를 한 번에 합성해 연속 억양을 얻고
+// ② 합성된 오디오에서 각 구간에 해당하는 "시간 구간"만 골라 위상 보코더로 속도/피치를 바꾼다.
+// 구간의 시간 위치는 음소 타이밍을 알 수 없어 모라 수 비례로 추정한다(±1모라 오차).
 function clampSpeed(v) { return Math.min(300, Math.max(50, v | 0)); }
 function clampSemis(v) { return Math.min(12, Math.max(-12, v | 0)); }
 
+// 모라 수(박자) 추정용 가중치. 시간 슬라이스 위치를 모라 비례로 잡는 데 쓴다.
+const SMALL_KANA = 'ァィゥェォャュョ';
+function moraWeight(ch) {
+  if (ch === '。') return 3;    // 긴 쉼
+  if (ch === '、') return 1.5;  // 짧은 쉼
+  if (ch === 'ー') return 1;    // 장음 +1박
+  if (SMALL_KANA.includes(ch)) return 0; // 작은가나는 앞 글자와 한 모라
+  if (/[ァ-ヶ]/.test(ch)) return 1;       // 일반 가타카나 1모라 (ッ ン 포함)
+  return 0;                     // ' / 공백 등은 시간 없음
+}
+function moraSum(s) { let w = 0; for (const ch of s) w += moraWeight(ch); return w; }
+
+// 태그를 파싱해 (속도·피치) 구간으로 나눈다. 값이 같은 이웃 구간은 하나로 합친다
+// (값을 안 바꾸는 {0} 등은 구간을 나누지 않게 — 단일 합성이라 영향은 없지만 보코더 횟수를 줄임).
 function parseSegments(kana, defaultSpeed) {
   const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}/g;
-  const segs = [];
+  const raw = [];
   let speed = defaultSpeed, semis = 0, last = 0, m;
-  const push = (t) => { const k = (t || '').trim(); if (k) segs.push({ kana: k, speed, semis }); };
+  const push = (t) => { if (t) raw.push({ text: t, speed, semis }); };
   while ((m = re.exec(kana)) !== null) {
     push(kana.slice(last, m.index));
     if (m[1] !== undefined) speed = clampSpeed(Number(m[1]));
@@ -128,35 +146,13 @@ function parseSegments(kana, defaultSpeed) {
     last = re.lastIndex;
   }
   push(kana.slice(last));
-  return segs;
-}
-
-// 선형보간 리샘플: ratio>1이면 r배 빨리 읽어 피치↑·길이↓ (피치 야매의 시간축 압축용).
-function resample(buf, ratio, ctx) {
-  const src = buf.getChannelData(0);
-  const n = src.length;
-  const outLen = Math.max(1, Math.round(n / ratio));
-  const out = ctx.createBuffer(1, outLen, ctx.sampleRate);
-  const od = out.getChannelData(0);
-  for (let i = 0; i < outLen; i++) {
-    const pos = i * ratio, i0 = Math.floor(pos), frac = pos - i0;
-    const a = src[i0] ?? 0;
-    const b = src[i0 + 1] ?? a;
-    od[i] = a + (b - a) * frac;
+  const segs = [];
+  for (const r of raw) {
+    const prev = segs[segs.length - 1];
+    if (prev && prev.speed === r.speed && prev.semis === r.semis) prev.text += r.text;
+    else segs.push({ ...r });
   }
-  return out;
-}
-
-// 한 구간을 합성한다. 피치(semis)가 있으면 varispeed 보정으로 길이를 보존한다.
-//   목표 피치 ×r 을 위해: ① AquesTalk를 speed/r 로 (느리게=길게) 합성하고
-//   ② 리샘플로 r배 압축 → 길이는 speed 기준 그대로, 피치만 ×r.
-//   (AquesTalk 속도는 피치를 안 바꾸므로 시간축은 엔진이, 피치는 리샘플이 담당)
-async function synthSegment(aq, seg, ctx) {
-  if (seg.semis === 0) return ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, seg.speed)));
-  const ratio = Math.pow(2, seg.semis / 12);
-  const synthSpeed = clampSpeed(Math.round(seg.speed / ratio));
-  const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(seg.kana, synthSpeed)));
-  return resample(decoded, ratio, ctx);
+  return segs;
 }
 
 // aq.run 결과(WAV 바이트)를 decodeAudioData가 받는 ArrayBuffer로.
@@ -165,31 +161,127 @@ function toArrayBuffer(wav) {
   return wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength);
 }
 
-// AquesTalk가 구간마다 앞뒤에 붙이는 무음을 떼어 이어붙일 때 텀이 안 생기게 한다.
-// (자연스러운 쉼은 구간 안의 、。로 표현되므로 구간 경계 무음만 제거)
-function trimSilence(buf, ctx) {
-  const data = buf.getChannelData(0);
+// 앞뒤 무음만 떼어낸 Float32 (내부 쉼 。、은 보존). margin 만큼 여유를 둔다.
+function trimEnds(data, sr) {
   const n = data.length, thr = 0.004;
   let s = 0, e = n;
   while (s < n && Math.abs(data[s]) < thr) s++;
   while (e > s && Math.abs(data[e - 1]) < thr) e--;
-  const margin = Math.round(ctx.sampleRate * 0.005); // 클릭 방지용 5ms 여유
+  const margin = Math.round(sr * 0.005);
   s = Math.max(0, s - margin);
   e = Math.min(n, e + margin);
-  if (e <= s) return null; // 전부 무음
-  const out = ctx.createBuffer(1, e - s, ctx.sampleRate);
-  out.copyToChannel(data.subarray(s, e), 0);
+  return e > s ? data.subarray(s, e) : data.subarray(0, 0);
+}
+
+// ── DSP: FFT · 위상 보코더 · 리샘플 ──────────────────────────────
+// 외부 의존성 없이 인라인 구현. 단일 합성 오디오의 한 구간만 시간축/피치로 변형한다.
+function fft(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr; const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (inverse ? 2 : -2) * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len >> 1; k++) {
+        const a = i + k, b = a + (len >> 1);
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+
+function hann(N) {
+  const w = new Float32Array(N);
+  for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / N);
+  return w;
+}
+
+// 위상 보코더 시간축 신축: 출력 길이 ≈ input.length * S, 피치는 보존.
+function phaseVocoder(input, S) {
+  const N = 1024, Ra = 256, Rs = Math.max(1, Math.round(Ra * S));
+  if (input.length < N) { const p = new Float32Array(N); p.set(input); input = p; }
+  const win = hann(N);
+  const numFrames = Math.floor((input.length - N) / Ra) + 1;
+  const outLen = (numFrames - 1) * Rs + N;
+  const out = new Float32Array(outLen), norm = new Float32Array(outLen);
+  const lastPhase = new Float32Array(N / 2 + 1), sumPhase = new Float32Array(N / 2 + 1);
+  const re = new Float32Array(N), im = new Float32Array(N);
+  const twoPi = 2 * Math.PI;
+  for (let f = 0; f < numFrames; f++) {
+    const inOff = f * Ra;
+    for (let i = 0; i < N; i++) { re[i] = input[inOff + i] * win[i]; im[i] = 0; }
+    fft(re, im, false);
+    for (let k = 0; k <= N / 2; k++) {
+      const mag = Math.hypot(re[k], im[k]);
+      const phase = Math.atan2(im[k], re[k]);
+      if (f === 0) { sumPhase[k] = phase; }
+      else {
+        const omega = (twoPi * Ra * k) / N;
+        let dphi = phase - lastPhase[k] - omega;
+        dphi -= twoPi * Math.round(dphi / twoPi); // 위상을 -π..π로
+        sumPhase[k] += (omega + dphi) * Rs / Ra;
+      }
+      lastPhase[k] = phase;
+      re[k] = mag * Math.cos(sumPhase[k]); im[k] = mag * Math.sin(sumPhase[k]);
+    }
+    for (let k = 1; k < N / 2; k++) { re[N - k] = re[k]; im[N - k] = -im[k]; } // 에르미트 대칭
+    im[0] = 0; im[N / 2] = 0;
+    fft(re, im, true);
+    const outOff = f * Rs;
+    for (let i = 0; i < N; i++) { out[outOff + i] += re[i] * win[i]; norm[outOff + i] += win[i] * win[i]; }
+  }
+  for (let i = 0; i < outLen; i++) if (norm[i] > 1e-6) out[i] /= norm[i];
   return out;
 }
 
-function concatBuffers(buffers, ctx) {
-  const total = buffers.reduce((a, b) => a + b.length, 0);
-  if (total === 0) return null;
-  const out = ctx.createBuffer(1, total, ctx.sampleRate);
-  const od = out.getChannelData(0);
-  let off = 0;
-  for (const b of buffers) { od.set(b.getChannelData(0), off); off += b.length; }
+// 선형보간 리샘플: ratio>1이면 빨리 읽어 길이↓·피치↑.
+function resampleArray(src, ratio) {
+  const outLen = Math.max(1, Math.round(src.length / ratio));
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio, i0 = Math.floor(pos), frac = pos - i0;
+    const a = src[i0] ?? 0, b = src[i0 + 1] ?? a;
+    out[i] = a + (b - a) * frac;
+  }
   return out;
+}
+
+// 한 구간을 시간축 timeScale 배·피치 ×p 로 변형.
+//   피치 ×p: 보코더로 p배 늘린 뒤 리샘플로 p배 압축 → 길이 유지, 피치만 ×p.
+//   속도(timeScale): 보코더 신축에 곱해 길이를 timeScale 배로.
+//   합치면 보코더 신축 = p*timeScale, 그다음 리샘플 ÷p.
+function processSlice(slice, timeScale, p) {
+  if (timeScale === 1 && p === 1) return slice;
+  const stretched = phaseVocoder(slice, p * timeScale);
+  return p === 1 ? stretched : resampleArray(stretched, p);
+}
+
+// 슬라이스들을 이어붙인다. 변형된 경계엔 짧은 크로스페이드로 클릭을 막는다.
+function concatSlices(items, fade) {
+  if (!items.length) return new Float32Array(0);
+  let cap = 0; for (const it of items) cap += it.data.length;
+  const out = new Float32Array(cap);
+  out.set(items[0].data, 0);
+  let pos = items[0].data.length;
+  for (let i = 1; i < items.length; i++) {
+    const s = items[i].data;
+    const f = Math.min((items[i - 1].processed || items[i].processed) ? fade : 0, pos, s.length);
+    const start = pos - f;
+    for (let j = 0; j < f; j++) { const t = j / f; out[start + j] = out[start + j] * (1 - t) + s[j] * t; }
+    out.set(s.subarray(f), start + f);
+    pos = start + f + (s.length - f);
+  }
+  return out.slice(0, pos);
 }
 
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
@@ -213,20 +305,44 @@ async function playKana(kana, btn) {
   activeBtn = btn;
   setPlayUI(btn, 'loading');
 
-  // 1) 음성 로드 + 구간별 합성 (실제 실패가 날 수 있는 구간)
+  // 1) 음성 로드 + 단일 합성 + 구간별 후처리 (실제 실패가 날 수 있는 구간)
   let buffer;
   try {
     const aq = await ensureVoice(voiceEl.value);
     const ctx = getCtx();
     if (ctx.state === 'suspended') await ctx.resume();
-    const segs = parseSegments(kana, Number(speedEl.value));
-    const buffers = [];
-    for (const seg of segs) {
-      await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
-      const trimmed = trimSilence(await synthSegment(aq, seg, ctx), ctx);
-      if (trimmed) buffers.push(trimmed);
+    const baseSpeed = Number(speedEl.value);
+    const segs = parseSegments(kana, baseSpeed);
+    const fullKana = segs.map((s) => s.text).join('').trim();
+    if (!fullKana) throw new Error('읽을 가나가 없음');
+
+    // ① 태그 뺀 전체를 한 번에 합성 → 연속 억양. 앞뒤 무음만 떼낸다.
+    await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
+    const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
+    const sr = decoded.sampleRate;
+    const data = trimEnds(decoded.getChannelData(0), sr);
+
+    // ② 구간을 모라 비례로 시간 슬라이스 → 속도/피치 다른 구간만 보코더로 변형
+    const weights = segs.map((s) => moraSum(s.text));
+    const total = weights.reduce((a, b) => a + b, 0) || 1;
+    const M = data.length;
+    const items = [];
+    let cum = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const startS = Math.round((cum / total) * M);
+      cum += weights[i];
+      const endS = i === segs.length - 1 ? M : Math.round((cum / total) * M);
+      if (endS <= startS) continue; // 시간 없는 구간(' / 공백만 등)
+      const slice = data.subarray(startS, endS);
+      const timeScale = baseSpeed / segs[i].speed; // 속도↑ → 압축
+      const p = Math.pow(2, segs[i].semis / 12);
+      const processed = !(timeScale === 1 && p === 1);
+      if (processed) await new Promise((r) => setTimeout(r, 0));
+      items.push({ data: processed ? processSlice(slice, timeScale, p) : slice, processed });
     }
-    buffer = concatBuffers(buffers, ctx);
+    const merged = concatSlices(items, Math.round(sr * 0.004));
+    buffer = merged.length ? ctx.createBuffer(1, merged.length, sr) : null;
+    if (buffer) buffer.copyToChannel(merged, 0);
   } catch (e) {
     console.error(e);
     busy = false;
