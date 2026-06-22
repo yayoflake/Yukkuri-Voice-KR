@@ -111,6 +111,7 @@ async function ensureVoice(voice) {
 // 가나 칸 태그로 그 자리부터 다음 같은 태그까지 속도/피치를 바꾼다.
 //   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
 //   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
+//   > / <  : 현재 피치에서 한 단계(±1반음) 올림/내림(상대·누적). 예) >ユックリ< (올렸다 원위치)
 // 태그가 없으면 전체가 슬라이더 속도·기본 피치다(기존과 동일).
 //
 // AquesTalk1엔 구간 속도·피치 기능이 없다. 구간마다 따로 합성하면 호출마다 억양이
@@ -135,14 +136,15 @@ function moraSum(s) { let w = 0; for (const ch of s) w += moraWeight(ch); return
 // 태그를 파싱해 (속도·피치) 구간으로 나눈다. 값이 같은 이웃 구간은 하나로 합친다
 // (값을 안 바꾸는 {0} 등은 구간을 나누지 않게 — 단일 합성이라 영향은 없지만 보코더 횟수를 줄임).
 function parseSegments(kana, defaultSpeed) {
-  const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}/g;
+  const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}|([<>])/g;
   const raw = [];
   let speed = defaultSpeed, semis = 0, last = 0, m;
   const push = (t) => { if (t) raw.push({ text: t, speed, semis }); };
   while ((m = re.exec(kana)) !== null) {
     push(kana.slice(last, m.index));
-    if (m[1] !== undefined) speed = clampSpeed(Number(m[1]));
-    else semis = clampSemis(Number(m[2]));
+    if (m[1] !== undefined) speed = clampSpeed(Number(m[1]));        // [속도] 절대
+    else if (m[2] !== undefined) semis = clampSemis(Number(m[2]));   // {반음} 절대
+    else semis = clampSemis(semis + (m[3] === '>' ? 1 : -1));        // > 올림 / < 내림 상대
     last = re.lastIndex;
   }
   push(kana.slice(last));
