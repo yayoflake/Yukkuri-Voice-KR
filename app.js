@@ -113,14 +113,8 @@ let hlOn = false;      // 현재 div로 바꿔치기(하이라이트 표시) 중
 const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => HTML_ESC[c]);
 
-// 덩어리를 끊는 구분 기호. / 는 악센트구, 공백·x 는 경계, . , 。 、 는 쉼(시간 먹음).
+// 덩어리를 끊는 구분 기호. / 는 악센트구, 공백·x 는 경계, . , 。 、 는 쉼.
 const HL_SEP = new Set(['/', '／', '.', ',', '。', '、', 'x', 'X', 'ｘ', 'Ｘ', ' ', '\t', '\n', '\r']);
-// 구분 기호가 먹는 쉼 길이(초). retimePauses의 목표 길이와 맞춘다. / 공백 x 는 쉼 없음.
-function hlPauseSec(ch) {
-  if (ch === '.' || ch === '。') return 0.24;
-  if (ch === ',' || ch === '、') return 0.045;
-  return 0;
-}
 // 덩어리 안에서 한 글자가 차지하는 박자(모라). 장음(-ー)도 포함, 작은가나는 0(앞과 한 모라).
 const HL_SMALL = 'ァィゥェォャュョ';
 function hlMora(ch) {
@@ -172,12 +166,35 @@ function clearHighlight() {
   hideKanaView();
 }
 
-// 합성 오디오에서 minGapSec 이상 이어지는 무음 구간 [start,end](초)을 찾는다.
-// retimePauses와 같은 임계(0.004)를 쓴다. 촉음 ッ 무음은 짧아(<minGap) 안 걸리고,
-// 마침표(.。) 쉼(~0.24s)은 걸리게 minGapSec을 그 사이(0.12s)로 둔다.
-function detectSilenceGaps(data, sr, minGapSec) {
-  const n = data.length, thr = 0.004, minGap = Math.round(sr * minGapSec);
-  const gaps = [];
+// 합성 오디오의 단시간 에너지(RMS)를 누적해 "전체 발성 에너지의 f(0~1) 지점이 재생 몇 초인지"를
+// 돌려주는 함수를 만든다. 쉼(무음)에선 에너지가 안 쌓이므로 경계가 자동으로 소리나는 구간에만
+// 떨어진다 — 쉼 길이·속도를 따로 추정할 필요 없이 실제 파형이 타이밍을 알려준다.
+function makeEnergyClock(data, sr) {
+  const hop = Math.max(1, Math.round(sr * 0.005));   // 5ms 간격
+  const half = Math.max(hop, Math.round(sr * 0.01)); // ±10ms 창
+  const K = Math.max(1, Math.floor(data.length / hop));
+  const cum = new Float64Array(K + 1);               // cum[k] = 0..k 구간 RMS 누적
+  for (let k = 0; k < K; k++) {
+    const c = k * hop, lo = Math.max(0, c - half), hi = Math.min(data.length, c + half);
+    let s = 0; for (let i = lo; i < hi; i++) s += data[i] * data[i];
+    cum[k + 1] = cum[k] + Math.sqrt(s / Math.max(1, hi - lo));
+  }
+  const total = cum[K] || 1;
+  return (f) => {                                    // f(0~1) → 초
+    const target = Math.min(Math.max(f, 0), 1) * total;
+    // 누적에너지가 target을 "넘어서는" 첫 지점(상한). 무음 평탄구간은 건너뛰어 그 끝(=다음
+    // 소리 시작)으로 떨어진다 → 쉼 직후 덩어리가 쉼이 끝나는 순간에 켜진다.
+    let lo = 0, hi = K;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] <= target) lo = mid + 1; else hi = mid; }
+    if (lo <= 0) return 0;
+    const e0 = cum[lo - 1], e1 = cum[lo], frac = e1 > e0 ? (target - e0) / (e1 - e0) : 0;
+    return ((lo - 1 + frac) * hop) / sr;
+  };
+}
+
+// minGapSec 이상 이어지는 무음 구간 [start,end](초). 덩어리 시작을 쉼 끝으로 스냅하는 데 쓴다.
+function detectGaps(data, sr, minGapSec) {
+  const n = data.length, thr = 0.006, minGap = Math.round(sr * minGapSec), gaps = [];
   for (let i = 0; i < n;) {
     if (Math.abs(data[i]) < thr) {
       let j = i; while (j < n && Math.abs(data[j]) < thr) j++;
@@ -188,67 +205,39 @@ function detectSilenceGaps(data, sr, minGapSec) {
   return gaps;
 }
 
-// 가나 칸 텍스트를 덩어리로 나누고, 마침표 쉼(.。)을 합성 오디오의 실제 무음에 "앵커"로
-// 고정한 뒤, 앵커 사이 구간만 모라 비례로 분배해 각 덩어리의 시작시각을 만든다.
-// (앵커가 문장마다 시각을 다시 잡아 줘서 누적 오차가 안 쌓인다. data 없으면 전체를 모라 비례로.)
-// [속도] 태그는 그 구간의 말하는 박자만 빠르게/느리게. 쉼표(,)는 앵커 안 하고 잔여로 둔다.
-function buildHighlight(text, duration, baseSpeed, data, sr) {
+// 가나 칸 텍스트를 구분 기호로 덩어리로 나누고, 각 덩어리 시작을 "그 앞까지의 모라 비율"에
+// 해당하는 에너지 시계 시각에 놓는다. 속도·쉼은 에너지 시계(실제 파형)가 알아서 반영하므로
+// 모라 수만 세면 된다. 끝으로, 시작이 무음 구간에 떨어지면 쉼 끝(소리 재개)으로 스냅한다.
+function buildHighlight(text, duration, data, sr) {
   const n = text.length;
-  // 1) 덩어리(말소리 범위)와 그 앞 쉼(초)·마침표 여부(major)를 모은다.
-  const chunks = []; // { a, b, mora, lead, major }
-  let cur = null, pending = 0, pendingMajor = false, speed = baseSpeed;
+  const chunks = []; // { a, b, mora }
+  let cur = null;
   for (let i = 0; i < n; i++) {
     const ch = text[i];
-    if (ch === '[') {
-      const m = /^\[(\d{1,3})\]/.exec(text.slice(i, i + 5));
-      if (m) speed = Math.min(300, Math.max(50, Number(m[1])));
-    }
-    if (HL_SEP.has(ch)) {
-      if (cur) { chunks.push(cur); cur = null; }
-      pending += hlPauseSec(ch);
-      if (ch === '.' || ch === '。') pendingMajor = true;
-      continue;
-    }
-    if (!cur) { cur = { a: i, b: i + 1, mora: 0, lead: pending, major: pendingMajor }; pending = 0; pendingMajor = false; }
+    if (HL_SEP.has(ch)) { if (cur) { chunks.push(cur); cur = null; } continue; }
+    if (!cur) cur = { a: i, b: i + 1, mora: 0 };
     else cur.b = i + 1;
-    cur.mora += hlMora(ch) * (baseSpeed / speed);
+    cur.mora += hlMora(ch);
   }
   if (cur) chunks.push(cur);
 
   const real = chunks.filter((c) => c.mora > 0);
   if (!real.length) { hlSegs = null; return; }
-  // 앞 쉼은 trimEnds로 오디오에서 잘려 나가므로 첫 덩어리는 쉼·앵커 없음.
-  real[0].lead = 0; real[0].major = false;
+  const totalMora = real.reduce((s, c) => s + c.mora, 0);
+  const clock = data ? makeEnergyClock(data, sr) : (f) => f * duration;
 
-  // 2) 마침표 경계(major)를 오디오의 실제 무음에 1:1로 맞춘다(긴 무음 우선, 위치 순).
-  const majorPos = []; for (let i = 1; i < real.length; i++) if (real[i].major) majorPos.push(i);
-  let anchors = [];
-  if (data && majorPos.length) {
-    const gaps = detectSilenceGaps(data, sr, 0.12);
-    const m = Math.min(gaps.length, majorPos.length);
-    anchors = gaps.slice().sort((x, y) => (y[1] - y[0]) - (x[1] - x[0])).slice(0, m).sort((x, y) => x[0] - y[0]);
-  }
-  const A = anchors.length; // 실제로 앵커한 마침표 수
-
-  // 3) 앵커로 끊은 "구절"마다 [T0,T1] 안에서 모라 비례로 분배(쉼표는 잔여 쉼으로 끼움).
   const segs = [];
-  const layout = (lo, hi, T0, T1) => { // real[lo..hi] 를 [T0,T1]에 배치
-    let M = 0, C = 0;
-    for (let i = lo; i <= hi; i++) { M += real[i].mora; if (i > lo) C += real[i].lead; }
-    const D = Math.max(0, (T1 - T0) - C);
-    let t = T0;
-    for (let i = lo; i <= hi; i++) {
-      if (i > lo) t += real[i].lead;            // 구절 안 쉼표만큼 흘려보냄
-      segs.push({ a: real[i].a, b: real[i].b, start: t });
-      if (M > 0) t += D * (real[i].mora / M);
+  let cum = 0;
+  for (const c of real) {
+    segs.push({ a: c.a, b: c.b, start: clock(cum / totalMora) });
+    cum += c.mora;
+  }
+  // 쉼(.,) 직후 덩어리가 무음 도중에 켜지지 않도록, 무음에 걸친 시작을 쉼 끝으로 민다.
+  if (data) {
+    const gaps = detectGaps(data, sr, 0.08);
+    for (const s of segs) {
+      for (const [g0, g1] of gaps) { if (s.start >= g0 - 0.02 && s.start < g1) { s.start = g1; break; } }
     }
-  };
-  for (let k = 0; k <= A; k++) {
-    const lo = k === 0 ? 0 : majorPos[k - 1];
-    const hi = k === A ? real.length - 1 : majorPos[k] - 1;
-    const T0 = k === 0 ? 0 : anchors[k - 1][1];          // 직전 무음 끝
-    const T1 = k === A ? duration : anchors[k][0];       // 다음 무음 시작
-    layout(lo, hi, T0, T1);
   }
   hlSegs = segs;
 }
@@ -265,14 +254,17 @@ function highlightTick() {
 }
 
 // 고급 재생이 막 시작될 때 호출 — div로 바꿔치기하고 타임라인·추적 루프를 건다.
-// buffer의 실제 파형으로 마침표 쉼을 앵커링해 동기를 맞춘다.
-function startHighlight(buffer, baseSpeed) {
+// buffer의 실제 파형(에너지)으로 덩어리 시작시각을 잡아 동기를 맞춘다.
+function startHighlight(buffer) {
   clearHighlight();
-  buildHighlight(kanaEl.value, buffer.duration, baseSpeed, buffer.getChannelData(0), buffer.sampleRate);
+  buildHighlight(kanaEl.value, buffer.duration, buffer.getChannelData(0), buffer.sampleRate);
   if (!hlSegs) return;
   showKanaView();
   paintHighlight(0);
-  hlStart = audioCtx.currentTime;
+  // 하이라이트는 ctx.currentTime 기준인데 실제 들리는 소리는 출력 지연만큼 늦다. 그만큼
+  // 시작 기준시각을 미뤄 들리는 소리에 맞춘다(브라우저가 안 주면 0, 과대값은 0.2s로 캡).
+  const lat = Math.min(0.2, audioCtx.outputLatency || audioCtx.baseLatency || 0);
+  hlStart = audioCtx.currentTime + lat;
   hlRAF = requestAnimationFrame(highlightTick);
 }
 
@@ -760,7 +752,7 @@ async function playKana(kana, btn) {
   setPlayUI(btn, 'playing');
   src.start();
   // 아래쪽(고급) 재생만: 가나 칸의 현재 덩어리를 따라 하이라이트한다.
-  if (btn === playKanaBtn) startHighlight(buffer, Number(speedEl.value));
+  if (btn === playKanaBtn) startHighlight(buffer);
 }
 
 textEl.addEventListener('input', regenerate);
