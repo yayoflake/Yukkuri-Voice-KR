@@ -102,12 +102,14 @@
     background:#faf7ef; font-size:20px; letter-spacing:.5px; line-height:1.5;
     font-family:inherit; color:var(--text);
   }
+  /* 한국어 읽기 보조 표기: 변환 기능은 유지하되 화면에는 노출하지 않는다.
+     (다시 보이려면 display:none 줄을 지우면 됨) */
   .kana-read {
+    display:none;
     margin-top:6px; padding:7px 12px; min-height:18px;
     font-size:13px; line-height:1.5; color:var(--muted);
     background:#f4efe4; border-radius:8px; word-break:break-all; white-space:pre-wrap;
   }
-  .kana-read:empty { display:none; }
   .hint { margin:8px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
   .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
   .msg { margin-top:8px; min-height:18px; font-size:13px; color:var(--accent2); font-weight:500; }
