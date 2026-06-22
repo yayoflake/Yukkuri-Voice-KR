@@ -364,20 +364,37 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed) {
   return warpVocoder(data, g, p, sr);
 }
 
-// x로 끊긴 단위들을 쉼 없이 이어붙인다. 각 단위의 끝/시작은 (정규화 테이퍼로) 잦아드므로
-// 등파워 크로스페이드로 겹쳐 틈·클릭 없이 매끄럽게 잇는다. (。와 달리 무음을 안 넣는다)
-function concatUnits(parts, sr) {
-  parts = parts.filter((p) => p && p.length);
-  if (parts.length === 0) return new Float32Array(0);
-  if (parts.length === 1) return parts[0];
-  const fade = Math.round(sr * 0.025); // 25ms 겹침
-  let cap = 0; for (const p of parts) cap += p.length;
+// 쉼 부호 1개의 길이(초). x 경계에선 쉼을 명시적 무음으로 바꿔 넣는다(아래 참고).
+function pauseSec(ch) {
+  if (ch === '。' || ch === '.') return 0.34;
+  if (ch === '、' || ch === ',') return 0.18;
+  return 0;
+}
+
+// 단위의 앞뒤 쉼 부호(、。)를 떼어 초 단위 길이로 환산하고, 가운데(core)만 합성 텍스트로 남긴다.
+// (앞뒤 쉼은 따로 합성하면 무음→trimEnds로 증발하므로, 명시적 무음으로 단위 사이에 끼운다)
+function splitPause(unit) {
+  let i = 0, j = unit.length, lead = 0, trail = 0, s;
+  while (i < j && (s = pauseSec(unit[i]))) { lead += s; i++; }
+  while (j > i && (s = pauseSec(unit[j - 1]))) { trail += s; j--; }
+  return { lead, core: unit.slice(i, j), trail };
+}
+
+function silenceArr(sec, sr) { return new Float32Array(Math.max(0, Math.round(sec * sr))); }
+
+// 오디오/무음 조각들을 잇는다. fade=true(쉼 없는 x 경계)면 등파워 크로스페이드로 매끄럽게
+// 겹치고, 아니면(무음을 낀 경계) 그대로 맞붙인다(조각 끝/시작이 잦아들어 클릭 없음).
+function concatItems(items, sr) {
+  items = items.filter((it) => it.data && it.data.length);
+  if (items.length === 0) return new Float32Array(0);
+  const fadeLen = Math.round(sr * 0.025); // 25ms 겹침
+  let cap = 0; for (const it of items) cap += it.data.length;
   const out = new Float32Array(cap);
-  out.set(parts[0], 0);
-  let pos = parts[0].length;
-  for (let i = 1; i < parts.length; i++) {
-    const s = parts[i];
-    const f = Math.min(fade, pos, s.length);
+  out.set(items[0].data, 0);
+  let pos = items[0].data.length;
+  for (let i = 1; i < items.length; i++) {
+    const s = items[i].data;
+    const f = items[i].fade ? Math.min(fadeLen, pos, s.length) : 0;
     const start = pos - f;
     for (let j = 0; j < f; j++) {
       const t = (j + 0.5) / f;
@@ -426,13 +443,27 @@ async function playKana(kana, btn) {
 
     // x(초기화·무쉼 경계)로 합성 단위를 나눈다. 단위마다 따로 합성해 억양을 리셋하고,
     // 쉼 없이 크로스페이드로 잇는다. x가 없으면 단위 하나(기존과 동일).
+    // x 경계에 붙은 쉼(,,, 등)은 합성하면 무음→trim으로 증발하므로, 명시적 무음으로 끼운다.
     const units = kana.split(/[xXｘＸ]/);
-    const parts = [];
+    const items = [];
+    let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
     for (const u of units) {
-      const m = await synthUnit(aq, ctx, u, baseSpeed);
-      if (m && m.length) parts.push(m);
+      const { lead, core, trail } = splitPause(u);
+      pending += lead;
+      const m = core ? await synthUnit(aq, ctx, core, baseSpeed) : null;
+      if (m && m.length) {
+        if (items.length && pending > 0) {
+          items.push({ data: silenceArr(pending, sr), fade: false }); // 쉼 → 무음 삽입
+          items.push({ data: m, fade: false });
+        } else {
+          items.push({ data: m, fade: items.length > 0 }); // 0갭 x 경계 → 크로스페이드
+        }
+        pending = trail;
+      } else {
+        pending += trail; // 합성할 게 없으면(순수 쉼 단위 등) 쉼만 누적
+      }
     }
-    const merged = concatUnits(parts, sr);
+    const merged = concatItems(items, sr);
     if (!merged.length) throw new Error('읽을 가나가 없음');
     fadeEdges(merged, sr); // 시작/끝 클릭 방지
 
