@@ -75,7 +75,9 @@
   .kb-wrap { position:relative; }
   .kbd {
     position:absolute; right:0; bottom:calc(100% + 6px); z-index:50;
-    width:min(296px,92vw);
+    /* 키보드를 조금 키우되 .card(콘텐츠 폭 = 560 - 좌우 padding 52) 안에 머물게.
+       모바일에선 화면 폭 - (body 24·2 + card 26·2)만큼으로 제한한다. */
+    width:min(372px, calc(100vw - 100px));
     background:var(--card); border:1px solid var(--line); border-radius:10px;
     box-shadow:0 6px 18px rgba(0,0,0,.16); padding:6px;
   }
@@ -87,12 +89,16 @@
   }
   .kbd-tabs button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .kbd-scroll { max-height:150px; overflow:auto; overscroll-behavior:contain; }
-  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:3px; }
+  .kbd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
   .kbd-grid[hidden] { display:none; }
   .kbd-grid button {
-    margin:0; width:100%; padding:5px 0; font-size:13px; font-weight:600;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+    margin:0; width:100%; padding:6px 0; line-height:1.1; font-weight:600;
     background:#fff; color:var(--text); border:1px solid var(--line); border-radius:5px; transition:none;
   }
+  .kbd-grid button .k { font-size:18px; }
+  .kbd-grid button .r { font-size:10px; font-weight:500; color:var(--muted); }
+  .kbd-grid button:active .r { color:#fff; }
   .kbd-grid button:hover:not(:disabled) { background:#f0ebe0; }
   .kbd-grid button:active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .kbd-grid .spacer { visibility:hidden; }
@@ -182,6 +188,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260622c"></script>
+  <script type="module" src="./app.js?v=20260622d"></script>
 </body>
 </html>

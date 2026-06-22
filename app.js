@@ -206,6 +206,13 @@ const KB_SMALL = [
 const KB_TABS = [['청음', KB_BASE], ['탁음·반탁음', KB_DAKU], ['작은가나·기호', KB_SMALL]];
 const kbGrids = [];
 
+// 버튼 아래에 보조로 띄울 한글 발음. 한글 음절로 떨어지는 가나만 표기하고
+// 받침용 가나(ン/ッ)·작은가나·기호는 발음 칸을 비운다.
+function kanaReading(ch) {
+  const r = katakanaToKorean(ch);
+  return /^[가-힣]+$/.test(r) ? r : '';
+}
+
 function buildKeyboard() {
   KB_TABS.forEach(([label, rows], i) => {
     const tab = document.createElement('button');
@@ -222,8 +229,18 @@ function buildKeyboard() {
       if (ch === '') { const s = document.createElement('span'); s.className = 'spacer'; grid.appendChild(s); continue; }
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = ch;
       b.dataset.k = ch;
+      const k = document.createElement('span');
+      k.className = 'k';
+      k.textContent = ch;
+      b.appendChild(k);
+      const reading = kanaReading(ch);
+      if (reading) {
+        const r = document.createElement('span');
+        r.className = 'r';
+        r.textContent = reading;
+        b.appendChild(r);
+      }
       grid.appendChild(b);
     }
     kbGrids.push(grid);
