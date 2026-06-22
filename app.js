@@ -97,47 +97,55 @@ function stopPlayback() {
   }
 }
 
-// ── 고급 재생 중 글자 하이라이트 ──────────────────────────────────
+// ── 고급 재생 중 "덩어리(악센트구)" 하이라이트 ────────────────────
 // textarea는 글자별 배경을 못 주므로, 같은 글꼴·줄바꿈으로 뒤에 깔린 backdrop(kanaHlEl)에
-// 현재 발음 중인 글자만 <mark>로 칠한다. 시각 표시이므로 표본 단위 정밀 동기까진 안 맞춰도 되고,
-// 가나 칸 텍스트를 모라 가중치(쉼/장음 포함)로 오디오 길이에 비례 분배해 카라오케식으로 따라간다.
-let hlSegs = null;     // [{ idx, start }] — 칠할 글자(쉼 제외)의 시작시각(초), 텍스트 순
+// 현재 발음 중인 덩어리를 통째로 <mark>로 칠한다. 덩어리는 구분 기호(/ . , 。 、 공백 x)로 나뉘며,
+// 그 덩어리가 발음되는 동안 계속 켜 둔다(글자 단위 카라오케가 아님).
+// 타이밍: 합성 오디오엔 음소별 시각이 없으므로, 각 덩어리를 모라 수에 비례해 길이를 나눠 갖고,
+// 덩어리 사이 쉼(. ,)은 retimePauses의 실제 목표 길이(초)만큼 시간을 끼워 동기를 맞춘다.
+let hlSegs = null;     // [{ a, b, start }] — 칠할 덩어리 범위[a,b)와 시작시각(초), 텍스트 순
 let hlStart = 0;       // 재생 시작 시점의 ctx.currentTime
 let hlRAF = 0;         // requestAnimationFrame 핸들
-let hlActive = -1;     // 현재 칠해진 글자 인덱스
+let hlActive = -1;     // 현재 칠해진 덩어리 인덱스(hlSegs 기준)
 
 const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => HTML_ESC[c]);
 
-// 가나 칸의 한 글자가 차지하는 박자(모라). 쉼(.,。、)·장음(-ー)도 시간을 먹으므로 포함한다.
+// 덩어리를 끊는 구분 기호. / 는 악센트구, 공백·x 는 경계, . , 。 、 는 쉼(시간 먹음).
+const HL_SEP = new Set(['/', '／', '.', ',', '。', '、', 'x', 'X', 'ｘ', 'Ｘ', ' ', '\t', '\n', '\r']);
+// 구분 기호가 먹는 쉼 길이(초). retimePauses의 목표 길이와 맞춘다. / 공백 x 는 쉼 없음.
+function hlPauseSec(ch) {
+  if (ch === '.' || ch === '。') return 0.24;
+  if (ch === ',' || ch === '、') return 0.045;
+  return 0;
+}
+// 덩어리 안에서 한 글자가 차지하는 박자(모라). 장음(-ー)도 포함, 작은가나는 0(앞과 한 모라).
 const HL_SMALL = 'ァィゥェォャュョ';
 function hlMora(ch) {
-  if (ch === '。' || ch === '.') return 1.6;  // 긴 쉼
-  if (ch === '、' || ch === ',') return 0.4;  // 짧은 쉼
-  if (ch === 'ー' || ch === '-') return 1;    // 장음 +1박
-  if (HL_SMALL.includes(ch)) return 0;        // 작은가나는 앞 글자와 한 모라
-  if (/[ぁ-ゖァ-ヶ]/.test(ch)) return 1;       // 가나 1모라 (ッ ン 포함)
-  return 0;                                    // ' / 공백 · 태그문자 등은 시간 없음
+  if (ch === 'ー' || ch === '-') return 1;
+  if (HL_SMALL.includes(ch)) return 0;
+  if (/[ぁ-ゖァ-ヶ]/.test(ch)) return 1; // 가나 1모라 (ッ ン 포함)
+  return 0;                               // ' > < · 태그문자 등은 시간 없음
 }
-const hlIsPause = (ch) => ch === '。' || ch === '.' || ch === '、' || ch === ',';
 
 // backdrop 스크롤을 textarea에 맞춘다 (긴 텍스트로 칸이 스크롤될 때 어긋나지 않게)
 function syncHighlightScroll() {
   kanaHlEl.style.transform = `translateY(${-kanaEl.scrollTop}px)`;
 }
 
-// idx 글자만 칠한 backdrop을 그린다. idx<0이면 비운다.
-function paintHighlight(idx) {
+// hlSegs[k] 덩어리를 통째로 칠한 backdrop을 그린다. k<0이면 비운다.
+function paintHighlight(k) {
   const text = kanaEl.value;
-  if (idx < 0 || idx >= text.length) {
+  if (k < 0 || !hlSegs || k >= hlSegs.length) {
     kanaHlEl.textContent = '';
   } else {
+    const { a, b } = hlSegs[k];
     kanaHlEl.innerHTML =
-      escapeHtml(text.slice(0, idx)) +
-      '<mark>' + escapeHtml(text[idx]) + '</mark>' +
-      escapeHtml(text.slice(idx + 1));
+      escapeHtml(text.slice(0, a)) +
+      '<mark>' + escapeHtml(text.slice(a, b)) + '</mark>' +
+      escapeHtml(text.slice(b));
   }
-  hlActive = idx;
+  hlActive = k;
   syncHighlightScroll();
 }
 
@@ -147,43 +155,57 @@ function clearHighlight() {
   if (hlActive !== -1) paintHighlight(-1);
 }
 
-// 가나 칸 텍스트를 오디오 길이에 모라 비례로 매핑해 글자별 시작시각을 만든다.
-// [속도] 태그는 그 구간의 "말하는" 박자만 빠르게/느리게 한다(쉼은 그대로).
+// 가나 칸 텍스트를 덩어리로 나누고, 오디오 길이를 (덩어리 모라 비례 + 쉼 실시간)으로 분배해
+// 각 덩어리의 시작시각을 만든다. [속도] 태그는 그 구간의 말하는 박자만 빠르게/느리게.
 function buildHighlight(text, duration, baseSpeed) {
   const n = text.length;
-  const w = new Float64Array(n);
-  let speed = baseSpeed, total = 0;
+  // 1) 덩어리(말소리 범위)와 그 앞에 쌓인 쉼(초)을 모은다.
+  const chunks = []; // { a, b, mora, lead }
+  let cur = null, pending = 0, speed = baseSpeed;
   for (let i = 0; i < n; i++) {
     const ch = text[i];
     if (ch === '[') {
       const m = /^\[(\d{1,3})\]/.exec(text.slice(i, i + 5));
       if (m) speed = Math.min(300, Math.max(50, Number(m[1])));
     }
-    const mw = hlMora(ch);
-    if (mw > 0) w[i] = hlIsPause(ch) ? mw : mw * (baseSpeed / speed);
-    total += w[i];
+    if (HL_SEP.has(ch)) {
+      if (cur) { chunks.push(cur); cur = null; }
+      pending += hlPauseSec(ch);
+      continue;
+    }
+    if (!cur) { cur = { a: i, b: i + 1, mora: 0, lead: pending }; pending = 0; }
+    else cur.b = i + 1;
+    cur.mora += hlMora(ch) * (baseSpeed / speed);
   }
-  if (total <= 0) { hlSegs = null; return; }
+  if (cur) chunks.push(cur);
+  // 앞·뒤 쉼은 trimEnds로 오디오에서 잘려 나가므로 타이밍에 넣지 않는다.
+  if (chunks.length) chunks[0].lead = 0;
+
+  const real = chunks.filter((c) => c.mora > 0);
+  if (!real.length) { hlSegs = null; return; }
+  const totalMora = real.reduce((s, c) => s + c.mora, 0);
+  let totalPause = 0; for (const c of real) totalPause += c.lead;
+  const speechDur = Math.max(0, duration - totalPause);
+
+  // 2) 시간을 누적해 각 덩어리의 시작시각을 잡는다.
   const segs = [];
-  let cum = 0;
-  for (let i = 0; i < n; i++) {
-    if (w[i] <= 0) continue;
-    const start = (cum / total) * duration;
-    cum += w[i];
-    // 쉼은 칠하지 않는다(앞 글자가 쉼 동안 계속 켜져 있게) — 시간만 먹고 넘어간다.
-    if (!hlIsPause(text[i])) segs.push({ idx: i, start });
+  let t = 0;
+  for (const c of real) {
+    t += c.lead;                 // 이 덩어리 앞 쉼만큼 흘려보냄
+    segs.push({ a: c.a, b: c.b, start: t });
+    t += speechDur * (c.mora / totalMora);
   }
-  hlSegs = segs.length ? segs : null;
+  hlSegs = segs;
 }
 
-// 재생 동안 매 프레임 현재 시각에 맞는 글자를 칠한다. "이미 시작한 마지막 글자"를 켜므로
-// 쉼 구간엔 직전 글자가 계속 켜져 있고, 글자 사이에 빈틈이 안 생긴다.
+// 재생 동안 매 프레임 현재 시각의 덩어리를 칠한다. "이미 시작한 마지막 덩어리"를 켜므로
+// 쉼 구간엔 직전 덩어리가 계속 켜져 있고, 덩어리 사이에 빈틈이 안 생긴다.
 function highlightTick() {
   if (!hlSegs || !audioCtx) return;
   const elapsed = audioCtx.currentTime - hlStart;
-  let idx = -1;
-  for (const s of hlSegs) { if (elapsed >= s.start) idx = s.idx; else break; }
-  if (idx !== hlActive) paintHighlight(idx);
+  let k = -1;
+  for (let i = 0; i < hlSegs.length; i++) { if (elapsed >= hlSegs[i].start) k = i; else break; }
+  if (k !== hlActive) paintHighlight(k);
   hlRAF = requestAnimationFrame(highlightTick);
 }
 
