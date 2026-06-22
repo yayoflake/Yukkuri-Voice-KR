@@ -33,7 +33,18 @@ let currentGain = null;    // 재생 체인의 GainNode (정지 시 램프다운
 let activeBtn = null;      // 재생/준비 UI를 표시 중인 버튼 (위/아래)
 
 function getCtx() {
-  return (audioCtx ??= new (window.AudioContext || window.webkitAudioContext)());
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // 무음 keepalive: 출력 스트림을 계속 열어둔다. 이게 없으면 재생이 끝나고 노드를
+    // 해제할 때 활성 소스가 사라져 브라우저가 오디오 장치를 닫고, 그 순간 "툭/작게 튐"이 난다.
+    try {
+      const ka = audioCtx.createConstantSource();
+      ka.offset.value = 0;
+      ka.connect(audioCtx.destination);
+      ka.start();
+    } catch { /* ConstantSource 미지원 시 무시 */ }
+  }
+  return audioCtx;
 }
 
 // 재생창 밑 메시지: 오류만 붉은글씨로 표시. btn에 따라 위/아래 메시지 칸을 고른다.
