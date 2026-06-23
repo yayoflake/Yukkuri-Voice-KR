@@ -66,7 +66,7 @@ function setPlayUI(btn, mode) {
   btn.disabled = (mode === 'loading');
   btn.textContent =
     mode === 'loading' ? '⏳ 준비 중…' :
-    mode === 'playing' ? '■ 정지' : '▶ 재생';
+    mode === 'playing' ? '■ 정지' : (btn.dataset.idle || '▶ 재생');
 }
 
 // 두 버튼을 모두 idle로 되돌린다 (재생 종료/중지/오류 시)
@@ -213,9 +213,11 @@ function detectGaps(data, sr, minGapSec) {
 // 마침표가 없으면 전체가 한 문장. data가 없으면 시간 비례로 폴백.
 function buildHighlight(text, duration, data, sr) {
   const n = text.length;
+  // @('여기서부터 재생') 뒤만 칠한다 — 합성도 @ 뒤만 하므로 시간축이 맞는다. (@ 없으면 -1+1=0)
+  const startIdx = text.lastIndexOf('@') + 1;
   const chunks = []; // { a, b, mora, period }  period=직전 구분자가 마침표였나
   let cur = null, pendingPeriod = false;
-  for (let i = 0; i < n; i++) {
+  for (let i = startIdx; i < n; i++) {
     const ch = text[i];
     if (HL_SEP.has(ch)) {
       if (cur) { chunks.push(cur); cur = null; }
@@ -709,6 +711,11 @@ async function playKana(kana, btn) {
   // AquesTalk1이 받는 형태로 정리한다. ([속도] 태그는 ASCII라 정규화에 안 걸림)
   // 변환결과 칸은 . , 를 ASCII로 보여주지만, 실제 합성은 AquesTalk1 쉼 기호 。 、 로 바꿔 넣는다.
   // 공백문자(스페이스·탭·줄바꿈)는 합성에서 의미가 없으므로 모두 제거한다.
+  // @ : '여기서부터 재생'. @ 뒤(여러 개면 마지막 @ 기준)만 합성해, 중간을 편집하고도
+  //     매번 처음부터 듣지 않게 한다. (@ 자체는 빠지고, 하이라이트도 @ 뒤만 칠한다 → buildHighlight)
+  const atPos = kana.lastIndexOf('@');
+  if (atPos >= 0) kana = kana.slice(atPos + 1);
+
   kana = normalizeProsody(hiraToKata(kana))
     .replace(/\./g, '。')
     .replace(/,/g, '、')
