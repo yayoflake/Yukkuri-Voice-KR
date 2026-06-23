@@ -317,10 +317,31 @@ function updateKanaRead() {
   kanaReadEl.textContent = katakanaToKorean(kanaEl.value);
 }
 
+let kanaDirty = false;     // 사용자가 고급 편집 칸을 직접 고쳤는지(변환 덮어쓰기 경고용)
+let suppressDirty = false; // 프로그램이 칸 값을 바꾸는 동안엔 편집 플래그를 올리지 않음
+
+// 편집 칸 값 교체. Ctrl+Z로 되돌릴 수 있게 네이티브 undo 스택을 보존한다(execCommand).
+function setKanaValue(text) {
+  suppressDirty = true;
+  kanaEl.focus();
+  kanaEl.select();
+  const ok = text
+    ? document.execCommand('insertText', false, text)
+    : document.execCommand('delete');
+  if (!ok) kanaEl.value = text; // execCommand 미지원 시 폴백(undo 불가)
+  suppressDirty = false;
+}
+
 // 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 고급 편집의 출발점)
 function regenerate() {
-  kanaEl.value = displayKana(koreanKana());
+  // 직접 고친 내용이 있으면 덮어쓰기 전에 한 번 확인
+  if (kanaDirty && kanaEl.value.trim() &&
+      !confirm('고급 편집 칸을 직접 고친 내용이 있습니다.\n변환하면 덮어써집니다. 계속할까요?\n(실수로 덮어썼다면 편집 칸에서 Ctrl+Z로 되돌릴 수 있습니다.)')) {
+    return;
+  }
+  setKanaValue(displayKana(koreanKana()));
   updateKanaRead();
+  kanaDirty = false;
 }
 
 // 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
@@ -460,6 +481,35 @@ function retimePauses(data, sr, fullKana) {
     else { out.set(data.subarray(p.a, p.b), off); off += p.b - p.a; }
   }
   return out;
+}
+
+// 문자 위치 → 샘플 위치 매핑(fullKana 코드포인트 경계마다 한 칸, 길이 = 글자수+1).
+// 쉼(、。)은 retimePauses가 박은 "실제 고정 길이"(PAUSE_TARGET)를 그대로 차지하고, 나머지
+// 샘플(=발음·촉음)만 발음 모라에 비례 배분한다. 쉼을 모라 가중치(0.4/1.6)로 근사하던 기존
+// 방식은 그 근사값이 고정 길이와 어긋나, 쉼이 길어질수록(쉼표 중첩) 뒤따르는 구간 경계가
+// 밀려 반음·속도 전환 타이밍이 어긋났다. retime 실패 등으로 쉼 길이가 안 맞으면 모라비례로 폴백.
+function charSampleMap(fullKana, M, sr) {
+  let pauseSamples = 0, speechMora = 0;
+  for (const ch of fullKana) {
+    const pt = PAUSE_TARGET[ch];
+    if (pt != null) pauseSamples += pt * sr;
+    else speechMora += moraWeight(ch);
+  }
+  const map = [0];
+  if (pauseSamples >= M || speechMora <= 0) { // 폴백: 전부 모라 비례
+    const total = moraSum(fullKana) || 1;
+    let cum = 0;
+    for (const ch of fullKana) { cum += moraWeight(ch); map.push((cum / total) * M); }
+    return map;
+  }
+  const speechSamples = M - pauseSamples;
+  let s = 0;
+  for (const ch of fullKana) {
+    const pt = PAUSE_TARGET[ch];
+    s += pt != null ? pt * sr : (moraWeight(ch) / speechMora) * speechSamples;
+    map.push(s);
+  }
+  return map;
 }
 
 // ── DSP: FFT · 위상 보코더 · 리샘플 ──────────────────────────────
@@ -814,8 +864,11 @@ async function playKana(kana, btn) {
 
 // ▼ 변환 버튼을 눌러야 비로소 한국어 칸 → 고급 편집 칸으로 옮긴다(실시간 갱신 안 함).
 convertBtn.addEventListener('click', regenerate);
-// 가나 칸을 직접 고치면 한국어 읽기 보조 표기도 따라 갱신
-kanaEl.addEventListener('input', updateKanaRead);
+// 가나 칸을 직접 고치면 편집 플래그를 세우고 한국어 읽기 보조 표기도 따라 갱신
+kanaEl.addEventListener('input', () => {
+  if (!suppressDirty) kanaDirty = true;
+  updateKanaRead();
+});
 // 자동 / 토글 버튼: 켜고 끌 때 상태만 바꾼다. 고급 편집 칸은 ▼ 변환을 눌러야 갱신된다.
 autoSlashBtn.addEventListener('click', () => {
   autoSlash = !autoSlash;
@@ -935,6 +988,7 @@ function insertKana(text) {
   const pos = s + text.length;
   caret = { s: pos, e: pos };
   kanaEl.setSelectionRange(pos, pos);
+  kanaDirty = true;
   updateKanaRead();
 }
 // 커서 앞 한 글자 삭제 (선택 영역이 있으면 그 영역 삭제)
@@ -946,6 +1000,7 @@ function backspaceKana() {
   kanaEl.value = kanaEl.value.slice(0, s) + kanaEl.value.slice(e);
   caret = { s, e: s };
   kanaEl.setSelectionRange(s, s);
+  kanaDirty = true;
   updateKanaRead();
 }
 
