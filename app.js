@@ -960,13 +960,28 @@ copyKanaBtn.addEventListener('click', async () => {
   setTimeout(() => copyKanaBtn.classList.remove('copied'), 900);
 });
 
+// 운율 태그까지 직접 보여줄 예제는 가나를 그대로 넣는다(한국어→변환으로 못 만드는 시연용).
+// 긴 멀티라인·특수문자 문자열이라 HTML data 속성 대신 JS에서 dataset에 심는다(이스케이프 불필요).
+const exMesmerizer = $('ex-mesmerizer');
+if (exMesmerizer) {
+  exMesmerizer.dataset.ko =
+    '콘나 지다이니 아츠라에타 미테쿠레노 키쟈쿠세이에이에\n' +
+    '혼토-노 시바이데 다마사레루 야타라토 우루사이 신조-노 코도-';
+  exMesmerizer.dataset.kana =
+    '(f1)[300]{+7}コ----ン----ナ---->>ジ----<<ダ----イ-----ニ---->>ア----<<ツ---------<<ラ---------<エ---------<<タ---<<ミ----->>テ----<<ク---->>レ----<<ノ---->>キ---->>ジャ----.セ------------>イ-----<エ----->イ-----<エ--------x\n' +
+    '{+2}ホ----<<ン----{+7}ト--------ノ---->>シ----<<バ----イ----デ---->>ダ-----<<マ--------<<サ---------<レ---------<<ル----\n' +
+    '<<ヤ---->>タ----<<ラ---->>ト----<<ウ---->>ル----{+12}サ----イ----{+9}シ----ン-------<<ジョ----<<ノ----<コ---->ヲ----<ド---->ヲ----';
+}
+
 // 예제 뱃지: 누르면 한국어 입력창·편집 칸에 예문을 채우고 곧바로 (고급) 재생한다.
 const exampleList = $('examplelist');
 exampleList.addEventListener('click', (e) => {
   const b = e.target.closest('.example-badge');
   if (!b || busy) return;
-  textEl.value = b.dataset.ko;
-  setKanaValue(displayKana(koreanKana())); // 한국어 → 가타카나(히라가나 모드면 히라가나)
+  textEl.value = b.dataset.ko || '';
+  // data-kana가 있으면 그 가나를 그대로(운율 태그 보존), 없으면 한국어를 변환해 편집 칸에 넣는다.
+  const kana = b.dataset.kana != null ? b.dataset.kana : koreanKana();
+  setKanaValue(displayKana(kana)); // 히라가나 모드면 표시만 히라가나로
   updateKanaRead();
   kanaDirty = false;
   if (currentSource) { stopPlayback(); resetPlayUI(); } // 재생 중이면 멈추고 새 예문 재생
