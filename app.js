@@ -55,17 +55,12 @@ function setError(btn, msg = '') {
   (btn === playKanaBtn ? msgKanaEl : msgEl).textContent = msg;
 }
 
-// 버튼의 평상시(idle) 라벨 — 위/아래가 다르다
-function idleLabel(btn) {
-  return '▶ 재생';
-}
-
-// 버튼 상태:  'idle' ▶재생 / 'loading' ⏳준비중 / 'playing' ■정지
+// 버튼 상태:  'idle' ▶재생 / 'loading' ⏳준비중 / 'playing' ■정지 (위/아래 라벨 동일)
 function setPlayUI(btn, mode) {
   btn.disabled = (mode === 'loading');
   btn.textContent =
     mode === 'loading' ? '⏳ 준비 중…' :
-    mode === 'playing' ? '■ 정지' : idleLabel(btn);
+    mode === 'playing' ? '■ 정지' : '▶ 재생';
 }
 
 // 두 버튼을 모두 idle로 되돌린다 (재생 종료/중지/오류 시)

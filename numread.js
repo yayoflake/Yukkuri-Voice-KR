@@ -117,7 +117,7 @@ export function normalizeNumbers(text) {
   // 2) 일반 숫자(+소수) (+뒤따르는 단위)
   //    그룹: [정수][.소수][공백][뒤 한글/단위문자]
   return text.replace(
-    /(\d[\d,]*)(?:\.(\d+))?(\s*)([가-힣A-Za-z%℃°]+)?/g,
+    /(\d+(?:,\d{3})*)(?:\.(\d+))?(\s*)([가-힣A-Za-z%℃°]+)?/g,
     (m, intRaw, frac, space, word = '') => {
       const intVal = parseInt(intRaw.replace(/,/g, ''), 10);
       if (Number.isNaN(intVal)) return m;
