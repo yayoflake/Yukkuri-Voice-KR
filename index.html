@@ -138,7 +138,9 @@
   }
   .hint { margin:8px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
   .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
-  .hint .syntax span, .hint .examples span { display:inline-block; margin-right:14px; }
+  .hint .syntax, .hint .examples { display:flex; flex-wrap:wrap; gap:5px 14px; }
+  .hint .note { margin-top:5px; }
+  .hint .examples { margin-top:8px; align-items:baseline; }
   .msg { margin-top:8px; min-height:18px; font-size:13px; color:var(--accent2); font-weight:500; }
 </style>
 </head>
@@ -190,13 +192,14 @@
           <span><code>/</code> 악센트구 구분</span>
           <span><code>'</code> 억양 내림</span>
           <span><code>-</code> 장음</span>
-          <span><code>.</code> 긴 쉼·문장 끝(약 0.24초, 겹칠수록 길어짐)</span>
-          <span><code>,</code> 짧은 쉼·문장 내 쉼(약 0.05초, 겹칠수록 길어짐)</span>
+          <span><code>.</code> 마침표: 긴 쉼·문장 끝(약 0.24초)</span>
+          <span><code>,</code> 쉼표: 짧은 쉼·문장 내(약 0.05초)</span>
           <span><code>[숫자]</code> 속도 50~300</span>
           <span><code>{반음}</code> 피치 -12~+12</span>
           <span><code>&gt;</code> <code>&lt;</code> 피치 반음 올림/내림(누적)</span>
           <span><code>x</code> 억양 초기화(쉼 없이)</span>
         </div>
+        <div class="note">마침표·쉼표는 겹쳐 쓸수록 쉼이 길어짐</div>
         <div class="examples">
           <span class="lead">예)</span>
           <span><code>オハヨ/ゴザイマス</code></span>
@@ -234,6 +237,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260624h"></script>
+  <script type="module" src="./app.js?v=20260624i"></script>
 </body>
 </html>

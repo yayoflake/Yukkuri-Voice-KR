@@ -428,20 +428,25 @@ function retimePauses(data, sr, fullKana) {
   const target = new Map();
   pauseIdx.forEach((gi, k) => target.set(gi, marks[k]));
   if (!target.size) return data;
-  // 재조립: 매칭된 무음만 목표 길이로 줄이고, 나머지(촉음 등)는 그대로 둔다
-  const pieces = []; let prev = 0;
+  // 재조립: 매칭된 무음을 "정확히" 합산 목표 길이의 무음으로 교체한다. AquesTalk가 ,,를
+  // 얼마로 내든(렌더 gap 길이) 의존하지 않고 우리가 합산한 값을 그대로 박는다. 그래서
+  // ,,는 항상 ,의 2배가 된다. 나머지 무음(촉음 등)은 그대로 보존.
+  const pieces = []; let prev = 0; // {a,b}=원본 복사 | {sil}=무음 삽입(샘플 수)
   for (let gi = 0; gi < gaps.length; gi++) {
     if (!target.has(gi)) continue;
     const [a, b] = gaps[gi];
-    const keep = Math.min(Math.round(target.get(gi) * sr), b - a); // 원본보다 길게는 안 늘림
-    pieces.push([prev, a + keep]);
+    pieces.push({ a: prev, b: a });
+    pieces.push({ sil: Math.round(target.get(gi) * sr) });
     prev = b;
   }
-  pieces.push([prev, n]);
-  let outLen = 0; for (const [a, b] of pieces) outLen += b - a;
-  if (outLen === n) return data;
+  pieces.push({ a: prev, b: n });
+  let outLen = 0; for (const p of pieces) outLen += p.sil != null ? p.sil : (p.b - p.a);
   const out = new Float32Array(outLen);
-  let off = 0; for (const [a, b] of pieces) { out.set(data.subarray(a, b), off); off += b - a; }
+  let off = 0;
+  for (const p of pieces) {
+    if (p.sil != null) { off += p.sil; } // 0으로 초기화돼 있어 그대로 무음
+    else { out.set(data.subarray(p.a, p.b), off); off += p.b - p.a; }
+  }
   return out;
 }
 
