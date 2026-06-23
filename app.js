@@ -727,6 +727,20 @@ function dropDanglingSokuon(s) {
   return out.join('');
 }
 
+// 운율 보조 표기 정규화(normalizeProsody: ' 통일, 하이픈→장음 ー)를 구간 태그 바깥에만 적용한다.
+// 태그([±속도] {±반음}) 안의 음수 부호 -가 장음 ー로 바뀌면 파싱이 깨져 그 태그가 글자 그대로
+// AquesTalk에 넘어가 ERROR 105가 난다. 태그는 ASCII 그대로 두고 그 사이 텍스트만 정규화한다.
+const TAG_RE = /\[[+-]?\d{1,3}\]|\{[+-]?\d{1,2}\}/g;
+function normalizeProsodyOutsideTags(s) {
+  let out = '', last = 0, m;
+  TAG_RE.lastIndex = 0;
+  while ((m = TAG_RE.exec(s)) !== null) {
+    out += normalizeProsody(s.slice(last, m.index)) + m[0];
+    last = TAG_RE.lastIndex;
+  }
+  return out + normalizeProsody(s.slice(last));
+}
+
 // 오디오/무음 조각들을 잇는다. fade=true(쉼 없는 x 경계)면 등파워 크로스페이드로 매끄럽게
 // 겹치고, 아니면(무음을 낀 경계) 그대로 맞붙인다(조각 끝/시작이 잦아들어 클릭 없음).
 function concatItems(items, sr) {
@@ -779,7 +793,7 @@ async function playKana(kana, btn) {
     kana = kana.slice(atPos + 1);
   }
 
-  kana = normalizeProsody(hiraToKata(kana))
+  kana = normalizeProsodyOutsideTags(hiraToKata(kana))
     .replace(/\./g, '。')
     .replace(/,/g, '、')
     .replace(/\s+/g, '')
