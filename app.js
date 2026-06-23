@@ -10,6 +10,7 @@ const voiceEl = $('voice');
 const speedEl = $('speed');
 const speedVal = $('speedval');
 const playBtn = $('play');         // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
+const convertBtn = $('convert');   // ▼ 변환: 한국어 칸을 변환해 아래 고급 편집 칸에 넣기
 const playKanaBtn = $('playkana'); // 아래쪽(고급): 가나 칸을 그대로 재생
 const kanaEl = $('kana');          // 편집 가능한 가나 칸 (아래쪽 재생의 기준)
 const kanaViewEl = $('kanaview');  // 재생 중 textarea 대신 보여줄 하이라이트용 div
@@ -782,15 +783,15 @@ async function playKana(kana, btn) {
   if (btn === playKanaBtn) startHighlight(buffer);
 }
 
-textEl.addEventListener('input', regenerate);
+// ▼ 변환 버튼을 눌러야 비로소 한국어 칸 → 고급 편집 칸으로 옮긴다(실시간 갱신 안 함).
+convertBtn.addEventListener('click', regenerate);
 // 가나 칸을 직접 고치면 한국어 읽기 보조 표기도 따라 갱신
 kanaEl.addEventListener('input', updateKanaRead);
-// 자동 / 토글 버튼: 켜고 끌 때마다 변환결과를 다시 만든다
+// 자동 / 토글 버튼: 켜고 끌 때 상태만 바꾼다. 고급 편집 칸은 ▼ 변환을 눌러야 갱신된다.
 autoSlashBtn.addEventListener('click', () => {
   autoSlash = !autoSlash;
   autoSlashBtn.classList.toggle('active', autoSlash);
   autoSlashBtn.setAttribute('aria-pressed', String(autoSlash));
-  regenerate();
 });
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 // 위쪽(라이트): 한국어 칸을 단순 변환해 재생

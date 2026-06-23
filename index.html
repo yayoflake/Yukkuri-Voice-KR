@@ -42,6 +42,14 @@
   }
   button:hover:not(:disabled) { background:var(--accent2); }
   button:disabled { opacity:.55; cursor:default; }
+  .play-row { display:flex; gap:10px; margin-top:18px; }
+  .play-row button { margin-top:0; }
+  .play-row #play { flex:1; }
+  .convert-btn {
+    flex:none; width:auto; padding:13px 20px;
+    color:var(--text); background:#e3ddcf;
+  }
+  .convert-btn:hover:not(:disabled) { background:#d6cfbd; }
   .kana-wrap { margin-top:24px; }
   .kana-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
   .kana-head label { margin:0; }
@@ -147,27 +155,11 @@
       <span class="track"><span class="knob"></span></span>자동 구분자
     </button>
 
-    <div class="row">
-      <div>
-        <label for="voice">음성</label>
-        <select id="voice">
-          <option value="f1">여성 1 (f1)</option>
-          <option value="f2">여성 2 (f2)</option>
-          <option value="m1">남성 1 (m1)</option>
-          <option value="m2">남성 2 (m2)</option>
-          <option value="dvd">로봇 (dvd)</option>
-          <option value="imd1">악마 (imd1)</option>
-          <option value="jgr">신사 (jgr)</option>
-          <option value="r1">아이 (r1)</option>
-        </select>
-      </div>
-      <div>
-        <label for="speed">속도 <span class="speedval" id="speedval">120</span></label>
-        <input type="range" id="speed" min="50" max="300" step="10" value="120" />
-      </div>
+    <div class="play-row">
+      <button id="play">▶ 재생</button>
+      <button type="button" id="convert" class="convert-btn"
+              title="한국어를 변환해 아래 고급 편집 칸에 넣기">▼ 변환</button>
     </div>
-
-    <button id="play">▶ 재생</button>
     <div class="msg" id="msg"></div>
 
     <div class="kana-wrap">
@@ -191,20 +183,41 @@
           </div>
         </div>
       </div>
-      <textarea id="kana" placeholder="여기에 변환 결과가 표시됩니다."></textarea>
+      <textarea id="kana" placeholder="▼ 변환을 누르면 결과가 표시됩니다."></textarea>
       <div class="kana-view" id="kanaview" aria-hidden="true" hidden></div>
       <div class="kana-read" id="kanaread" aria-live="polite" title="가나 칸의 한국어 읽기"></div>
       <p class="hint">
         억양: 음 내려가는 자리에 <code>'</code> &nbsp;·&nbsp; 장음(길게): <code>-</code> 또는 <code>ー</code><br>
         구간 속도(50~300): <code>[숫자]</code> &nbsp;·&nbsp; 구간 피치(반음 -12~+12): <code>{+숫자}</code><br>
         피치 한 단계 올림/내림: <code>&gt;</code> / <code>&lt;</code> (상대·누적) &nbsp;·&nbsp; 억양 초기화(쉼 없이): <code>x</code><br>
-        예) <code>안녕'하세요</code>, <code>아-</code>, <code>[120]オハヨ[250]ゴザイマス</code>, <code>&gt;ユックリ&lt;ボイス</code>, <code>ボイスxインニダ</code>
+        예) <code>コンニチ'ハ</code>, <code>ヤ-</code>, <code>[120]オハヨ[250]ゴザイマス</code>, <code>&gt;ユックリ&lt;ボイス</code>, <code>ボイスxインニダ</code>
       </p>
+
+      <div class="row">
+        <div>
+          <label for="voice">음성</label>
+          <select id="voice">
+            <option value="f1">여성 1 (f1)</option>
+            <option value="f2">여성 2 (f2)</option>
+            <option value="m1">남성 1 (m1)</option>
+            <option value="m2">남성 2 (m2)</option>
+            <option value="dvd">로봇 (dvd)</option>
+            <option value="imd1">악마 (imd1)</option>
+            <option value="jgr">신사 (jgr)</option>
+            <option value="r1">아이 (r1)</option>
+          </select>
+        </div>
+        <div>
+          <label for="speed">속도 <span class="speedval" id="speedval">120</span></label>
+          <input type="range" id="speed" min="50" max="300" step="10" value="120" />
+        </div>
+      </div>
+
       <button id="playkana">▶ 재생</button>
       <div class="msg" id="msgkana"></div>
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260623y"></script>
+  <script type="module" src="./app.js?v=20260624a"></script>
 </body>
 </html>
