@@ -180,10 +180,10 @@
   .hint .syntax, .hint .examples { display:flex; flex-wrap:wrap; gap:5px 14px; }
   .hint .examples { margin-top:8px; align-items:baseline; }
   .msg { margin-top:8px; min-height:18px; font-size:13px; color:var(--accent2); font-weight:500; }
-  /* 변환 버튼 바로 아래 미리듣기 오류 칸(#msg)은 평소 비어 있다. 18px를 늘 차지하면 변환과
-     예제 사이에 의미불명한 빈 띠가 생기므로, 비었을 땐 접어두고(오류가 뜰 때만 18px 확보). */
-  #msg { min-height:0; }
-  #msg:not(:empty) { min-height:18px; }
+  /* 오류 칸(#msg=미리듣기, #msgkana=재생)은 평소 비어 있다. 18px를 늘 차지하면 변환↔예제,
+     재생↔문법 사이에 의미불명한 빈 띠가 생기므로, 비었을 땐 접어두고(오류가 뜰 때만 18px 확보). */
+  #msg, #msgkana { min-height:0; }
+  #msg:not(:empty), #msgkana:not(:empty) { min-height:18px; }
   /* 예제 섹션: 한국어 입력 ↔ 편집 사이의 접이식 칸. 뱃지를 누르면 두 칸을 채우고 바로 재생한다. */
   .examples-box { margin:12px 2px 0; }
   .example-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
