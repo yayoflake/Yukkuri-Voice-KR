@@ -337,7 +337,8 @@ async function ensureVoice(voice) {
 
 // ── 구간별 속도·피치 ──────────────────────────────────────────────
 // 가나 칸 태그로 그 자리부터 다음 같은 태그까지 속도/피치를 바꾼다.
-//   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
+//   [속도] : 50~300, 말 빠르기(절대).       예) [120]オハヨ[250]ゴザイマス
+//   [±속도]: 현재 속도에서 ±n(상대·누적).   예) [+50]ハヤク[-50]モドル ([속도]의 > < 버전)
 //   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
 //   > / <  : 현재 피치에서 한 단계(±1반음) 올림/내림(상대·누적). 예) >ユックリ< (올렸다 원위치)
 //   x      : 억양 초기화 경계. 。처럼 끊고 리셋하되 쉼 없이 이어 붙인다(단위별 따로 합성).
@@ -367,13 +368,14 @@ function moraSum(s) { let w = 0; for (const ch of s) w += moraWeight(ch); return
 // init: 직전 단위에서 이어받는 시작 상태(속도·피치). x로 단위를 끊어도 사용자가 지정한
 // 속도/누적 피치(> < {반음})는 보존하려고 마지막 상태를 돌려준다(억양 리셋은 따로 합성으로).
 function parseSegments(kana, defaultSpeed, init) {
-  const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}|([<>])/g;
+  const re = /\[([+-]?\d{1,3})\]|\{([+-]?\d{1,2})\}|([<>])/g;
   const raw = [];
   let speed = init?.speed ?? defaultSpeed, semis = init?.semis ?? 0, last = 0, m;
   const push = (t) => { if (t) raw.push({ text: t, speed, semis }); };
   while ((m = re.exec(kana)) !== null) {
     push(kana.slice(last, m.index));
-    if (m[1] !== undefined) speed = clampSpeed(Number(m[1]));        // [속도] 절대
+    if (m[1] !== undefined)                                          // [속도] 절대 / [+n][-n] 상대 누적
+      speed = clampSpeed(/^[+-]/.test(m[1]) ? speed + Number(m[1]) : Number(m[1]));
     else if (m[2] !== undefined) semis = clampSemis(Number(m[2]));   // {반음} 절대
     else semis = clampSemis(semis + (m[3] === '>' ? 1 : -1));        // > 올림 / < 내림 상대
     last = re.lastIndex;
