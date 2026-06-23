@@ -136,8 +136,11 @@
     font-size:13px; line-height:1.5; color:var(--muted);
     background:#f4efe4; border-radius:8px; word-break:break-all; white-space:pre-wrap;
   }
-  .hint { margin:8px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
-  .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
+  .hint { margin:10px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
+  .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; color:var(--text); }
+  .hint .syntax, .hint .examples { display:flex; flex-wrap:wrap; gap:5px 14px; }
+  .hint .examples { margin-top:8px; align-items:baseline; }
+  .hint .examples .lead { color:var(--muted); }
   .msg { margin-top:8px; min-height:18px; font-size:13px; color:var(--accent2); font-weight:500; }
 </style>
 </head>
@@ -184,12 +187,27 @@
       <textarea id="kana" placeholder="▼ 변환을 누르면 결과가 표시됩니다."></textarea>
       <div class="kana-view" id="kanaview" aria-hidden="true" hidden></div>
       <div class="kana-read" id="kanaread" aria-live="polite" title="가나 칸의 한국어 읽기"></div>
-      <p class="hint">
-        <code>/</code> 악센트구 구분 &nbsp;·&nbsp; <code>'</code> 억양 내림 &nbsp;·&nbsp; <code>-</code> 장음<br>
-        <code>[숫자]</code> 속도 50~300 &nbsp;·&nbsp; <code>{반음}</code> 피치 -12~+12<br>
-        <code>&gt;</code> <code>&lt;</code> 피치 반음 올림/내림(누적) &nbsp;·&nbsp; <code>x</code> 억양 초기화(쉼 없이)<br>
-        예) <code>オハヨ/ゴザイマス</code> · <code>コンニチ'ハ</code> · <code>ヤ-</code> · <code>[250]ハヤク</code> · <code>{+4}タカク</code> · <code>&gt;ユックリ&lt;</code> · <code>ボイスxインニダ</code>
-      </p>
+      <div class="hint">
+        <div class="syntax">
+          <span><code>/</code> 악센트구 구분</span>
+          <span><code>'</code> 억양 내림</span>
+          <span><code>-</code> 장음</span>
+          <span><code>[숫자]</code> 속도 50~300</span>
+          <span><code>{반음}</code> 피치 -12~+12</span>
+          <span><code>&gt;</code> <code>&lt;</code> 피치 반음 올림/내림(누적)</span>
+          <span><code>x</code> 억양 초기화(쉼 없이)</span>
+        </div>
+        <div class="examples">
+          <span class="lead">예)</span>
+          <span><code>オハヨ/ゴザイマス</code></span>
+          <span><code>コンニチ'ハ</code></span>
+          <span><code>ヤ-</code></span>
+          <span><code>[250]ハヤク</code></span>
+          <span><code>{+4}タカク</code></span>
+          <span><code>&gt;ユックリ&lt;</code></span>
+          <span><code>ボイスxインニダ</code></span>
+        </div>
+      </div>
 
       <div class="row">
         <div>
@@ -216,6 +234,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260624e"></script>
+  <script type="module" src="./app.js?v=20260624f"></script>
 </body>
 </html>
