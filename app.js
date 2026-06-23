@@ -332,11 +332,11 @@ function setKanaValue(text) {
   suppressDirty = false;
 }
 
-// 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 고급 편집의 출발점)
+// 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 편집의 출발점)
 function regenerate() {
   // 직접 고친 내용이 있으면 덮어쓰기 전에 한 번 확인
   if (kanaDirty && kanaEl.value.trim() &&
-      !confirm('고급 편집 칸을 직접 고친 내용이 있습니다.\n변환하면 덮어써집니다. 계속할까요?\n(실수로 덮어썼다면 편집 칸에서 Ctrl+Z로 되돌릴 수 있습니다.)')) {
+      !confirm('편집한 내용을 덮어씁니다. 계속할까요?')) {
     return;
   }
   setKanaValue(displayKana(koreanKana()));
