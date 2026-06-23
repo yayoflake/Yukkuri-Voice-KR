@@ -10,5 +10,8 @@
   },
   "dependencies": {
     "aquestalk.js": "^1.0.6"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^22.0.0"
   }
 }

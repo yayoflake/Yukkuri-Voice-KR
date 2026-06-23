@@ -5,7 +5,7 @@ const MIME={'.html':'text/html','.js':'text/javascript','.wasm':'application/was
 const server=http.createServer(async(req,res)=>{try{const p=decodeURIComponent(req.url.split('?')[0]);const fp=normalize(join(ROOT,p==='/'?'/index.html':p));if(!fp.startsWith(ROOT))return res.writeHead(403).end();res.writeHead(200,{'Content-Type':MIME[extname(fp)]||'application/octet-stream'});res.end(await readFile(fp));}catch{res.writeHead(404).end();}});
 await new Promise(r=>server.listen(0,r));
 const base=`http://localhost:${server.address().port}/`;
-const browser=await puppeteer.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:'shell',args:['--no-sandbox']});
+const browser=await puppeteer.launch({executablePath:process.env.CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:'shell',args:['--no-sandbox']});
 const page=await browser.newPage();
 page.on('pageerror',e=>console.log('  [pageerror]',e.message));
 await page.goto(base,{waitUntil:'load'});

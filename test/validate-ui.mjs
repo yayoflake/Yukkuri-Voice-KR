@@ -20,7 +20,7 @@ await new Promise((r) => server.listen(0, r));
 const base = `http://localhost:${server.address().port}/`;
 
 const browser = await puppeteer.launch({
-  executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  executablePath: process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   headless: 'shell', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage();

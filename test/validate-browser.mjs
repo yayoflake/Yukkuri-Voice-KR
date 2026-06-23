@@ -28,7 +28,7 @@ const port = server.address().port;
 const base = `http://localhost:${port}/`;
 console.log('serving at', base);
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: 'shell',
