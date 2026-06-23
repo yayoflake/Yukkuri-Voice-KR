@@ -340,7 +340,8 @@ async function ensureVoice(voice) {
 //   [속도] : 50~300, 말 빠르기.            예) [120]オハヨ[250]ゴザイマス
 //   {반음} : -12~+12 반음, 음 높이(강세).   예) ガ{+4}ガ{0}ガ (가운데만 높게)
 //   > / <  : 현재 피치에서 한 단계(±1반음) 올림/내림(상대·누적). 예) >ユックリ< (올렸다 원위치)
-//   x      : 억양 초기화 경계. 。처럼 끊고 리셋하되 쉼 없이 이어 붙인다(단위별 따로 합성).
+//   x      : 억양 초기화 경계. 。처럼 끊고 AquesTalk 억양만 리셋하되 쉼 없이 이어 붙인다
+//            (단위별 따로 합성). 속도·누적 피치(> < {반음})는 경계를 넘어 그대로 이어진다.
 // 태그가 없으면 전체가 슬라이더 속도·기본 피치다(기존과 동일).
 //
 // AquesTalk1엔 구간 속도·피치 기능이 없다. 구간마다 따로 합성하면 호출마다 억양이
@@ -364,10 +365,12 @@ function moraSum(s) { let w = 0; for (const ch of s) w += moraWeight(ch); return
 
 // 태그를 파싱해 (속도·피치) 구간으로 나눈다. 값이 같은 이웃 구간은 하나로 합친다
 // (값을 안 바꾸는 {0} 등은 구간을 나누지 않게 — 단일 합성이라 영향은 없지만 보코더 횟수를 줄임).
-function parseSegments(kana, defaultSpeed) {
+// init: 직전 단위에서 이어받는 시작 상태(속도·피치). x로 단위를 끊어도 사용자가 지정한
+// 속도/누적 피치(> < {반음})는 보존하려고 마지막 상태를 돌려준다(억양 리셋은 따로 합성으로).
+function parseSegments(kana, defaultSpeed, init) {
   const re = /\[(\d{1,3})\]|\{([+-]?\d{1,2})\}|([<>])/g;
   const raw = [];
-  let speed = defaultSpeed, semis = 0, last = 0, m;
+  let speed = init?.speed ?? defaultSpeed, semis = init?.semis ?? 0, last = 0, m;
   const push = (t) => { if (t) raw.push({ text: t, speed, semis }); };
   while ((m = re.exec(kana)) !== null) {
     push(kana.slice(last, m.index));
@@ -383,7 +386,7 @@ function parseSegments(kana, defaultSpeed) {
     if (prev && prev.speed === r.speed && prev.semis === r.semis) prev.text += r.text;
     else segs.push({ ...r });
   }
-  return segs;
+  return { segs, speed, semis };
 }
 
 // aq.run 결과(WAV 바이트)를 decodeAudioData가 받는 ArrayBuffer로.
@@ -586,12 +589,14 @@ function warpVocoder(x, g, p, sr) {
   return fin.subarray(0, fi);
 }
 
-// 한 합성 단위(x로 끊긴 한 덩어리)를 합성·후처리해 Float32로 돌려준다. (fade/pad/재생은 호출측)
-// 단위마다 따로 aq.run 하므로 AquesTalk 억양이 단위별로 리셋된다(= x의 "초기화").
-async function synthUnit(aq, ctx, unitKana, baseSpeed) {
-  const segs = parseSegments(unitKana, baseSpeed);
+// 한 합성 단위(x로 끊긴 한 덩어리)를 합성·후처리해 { data, state }로 돌려준다. (fade/pad/재생은 호출측)
+// 단위마다 따로 aq.run 하므로 AquesTalk 억양이 단위별로 리셋된다(= x의 "초기화"). 단, 속도·누적
+// 피치(> < {반음})는 init으로 이어받고 마지막 state로 돌려줘, x가 그 값까지 리셋하지 않게 한다.
+async function synthUnit(aq, ctx, unitKana, baseSpeed, init) {
+  const { segs, speed, semis } = parseSegments(unitKana, baseSpeed, init);
+  const state = { speed, semis };
   const fullKana = segs.map((s) => s.text).join('').trim();
-  if (!fullKana) return null;
+  if (!fullKana) return { data: null, state };
   await new Promise((r) => setTimeout(r, 0)); // 동기 합성 전 UI 갱신 양보
   const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
   const sr = decoded.sampleRate;
@@ -612,14 +617,14 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed) {
     for (let n = startS; n < endS; n++) { semisArr[n] = segs[i].semis; tsArr[n] = ts; }
     if (segs[i].semis !== 0 || segs[i].speed !== baseSpeed) changed = true;
   }
-  if (!changed) return data.slice(); // 태그 없음 → 원본 그대로
+  if (!changed) return { data: data.slice(), state }; // 태그 없음 → 원본 그대로
   await new Promise((r) => setTimeout(r, 0)); // 무거운 변형 전 UI 양보
   // 경계를 ~40ms 램프로 완만하게: 계단형 급변과 위상 불연속 제거
   const win = Math.max(2, Math.round(sr * 0.04));
   const sS = smooth(semisArr, win), tS = smooth(tsArr, win);
   const p = new Float32Array(M), g = new Float32Array(M);
   for (let n = 0; n < M; n++) { p[n] = Math.pow(2, sS[n] / 12); g[n] = p[n] * tS[n]; }
-  return warpVocoder(data, g, p, sr);
+  return { data: warpVocoder(data, g, p, sr), state };
 }
 
 // 쉼 부호 1개의 길이(초). x 경계에선 쉼을 명시적 무음으로 바꿔 넣는다(아래 참고).
@@ -744,10 +749,12 @@ async function playKana(kana, btn) {
     const units = kana.split(/[xXｘＸ]/);
     const items = [];
     let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
+    let state = { speed: baseSpeed, semis: 0 }; // x 경계를 넘어 이어지는 속도·누적 피치
     for (const u of units) {
       const { lead, core, trail } = splitPause(u);
       pending += lead;
-      const m = core ? await synthUnit(aq, ctx, core, baseSpeed) : null;
+      let m = null;
+      if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
       if (m && m.length) {
         if (items.length && pending > 0) {
           items.push({ data: silenceArr(pending, sr), fade: false }); // 쉼 → 무음 삽입
