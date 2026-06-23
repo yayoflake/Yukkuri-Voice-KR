@@ -166,10 +166,9 @@ function clearHighlight() {
   hideKanaView();
 }
 
-// 합성 오디오의 단시간 에너지(RMS)를 누적해 "전체 발성 에너지의 f(0~1) 지점이 재생 몇 초인지"를
-// 돌려주는 함수를 만든다. 쉼(무음)에선 에너지가 안 쌓이므로 경계가 자동으로 소리나는 구간에만
-// 떨어진다 — 쉼 길이·속도를 따로 추정할 필요 없이 실제 파형이 타이밍을 알려준다.
-function makeEnergyClock(data, sr) {
+// 합성 오디오의 단시간 에너지(RMS)를 누적한 프로파일. energyAtTime(t)=t초까지의 누적에너지,
+// timeAtEnergy(e)=누적에너지가 e에 닿는 초. 쉼(무음)에선 에너지가 안 쌓여 평탄해진다.
+function makeEnergyProfile(data, sr) {
   const hop = Math.max(1, Math.round(sr * 0.005));   // 5ms 간격
   const half = Math.max(hop, Math.round(sr * 0.01)); // ±10ms 창
   const K = Math.max(1, Math.floor(data.length / hop));
@@ -180,19 +179,20 @@ function makeEnergyClock(data, sr) {
     cum[k + 1] = cum[k] + Math.sqrt(s / Math.max(1, hi - lo));
   }
   const total = cum[K] || 1;
-  return (f) => {                                    // f(0~1) → 초
-    const target = Math.min(Math.max(f, 0), 1) * total;
-    // 누적에너지가 target을 "넘어서는" 첫 지점(상한). 무음 평탄구간은 건너뛰어 그 끝(=다음
-    // 소리 시작)으로 떨어진다 → 쉼 직후 덩어리가 쉼이 끝나는 순간에 켜진다.
+  const energyAtTime = (t) => { let k = Math.round((t * sr) / hop); if (k < 0) k = 0; if (k > K) k = K; return cum[k]; };
+  // 누적에너지가 e를 "넘어서는" 첫 지점(상한). 무음 평탄구간은 건너뛰어 그 끝(=소리 재개)으로.
+  const timeAtEnergy = (e) => {
+    const target = Math.min(Math.max(e, 0), total);
     let lo = 0, hi = K;
     while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] <= target) lo = mid + 1; else hi = mid; }
     if (lo <= 0) return 0;
     const e0 = cum[lo - 1], e1 = cum[lo], frac = e1 > e0 ? (target - e0) / (e1 - e0) : 0;
     return ((lo - 1 + frac) * hop) / sr;
   };
+  return { total, energyAtTime, timeAtEnergy };
 }
 
-// minGapSec 이상 이어지는 무음 구간 [start,end](초). 덩어리 시작을 쉼 끝으로 스냅하는 데 쓴다.
+// minGapSec 이상 이어지는 무음 구간 [start,end](초). 마침표(긴 쉼)를 실제 무음에 못박는 데 쓴다.
 function detectGaps(data, sr, minGapSec) {
   const n = data.length, thr = 0.006, minGap = Math.round(sr * minGapSec), gaps = [];
   for (let i = 0; i < n;) {
@@ -205,17 +205,22 @@ function detectGaps(data, sr, minGapSec) {
   return gaps;
 }
 
-// 가나 칸 텍스트를 구분 기호로 덩어리로 나누고, 각 덩어리 시작을 "그 앞까지의 모라 비율"에
-// 해당하는 에너지 시계 시각에 놓는다. 속도·쉼은 에너지 시계(실제 파형)가 알아서 반영하므로
-// 모라 수만 세면 된다. 끝으로, 시작이 무음 구간에 떨어지면 쉼 끝(소리 재개)으로 스냅한다.
+// 가나 칸 텍스트를 구분 기호로 덩어리로 나누고 각 덩어리 시작시각을 만든다.
+//  · 마침표(.。)는 긴 쉼이라 실제 무음 구간에 "문장 경계"를 못박는다.
+//  · 각 문장 안에서만 에너지 비례로 덩어리를 분배한다(문장 간 에너지 불균형이 안 샘).
+// 마침표가 없으면 전체가 한 문장. data가 없으면 시간 비례로 폴백.
 function buildHighlight(text, duration, data, sr) {
   const n = text.length;
-  const chunks = []; // { a, b, mora }
-  let cur = null;
+  const chunks = []; // { a, b, mora, period }  period=직전 구분자가 마침표였나
+  let cur = null, pendingPeriod = false;
   for (let i = 0; i < n; i++) {
     const ch = text[i];
-    if (HL_SEP.has(ch)) { if (cur) { chunks.push(cur); cur = null; } continue; }
-    if (!cur) cur = { a: i, b: i + 1, mora: 0 };
+    if (HL_SEP.has(ch)) {
+      if (cur) { chunks.push(cur); cur = null; }
+      if (ch === '.' || ch === '。') pendingPeriod = true;
+      continue;
+    }
+    if (!cur) { cur = { a: i, b: i + 1, mora: 0, period: pendingPeriod }; pendingPeriod = false; }
     else cur.b = i + 1;
     cur.mora += hlMora(ch);
   }
@@ -223,20 +228,42 @@ function buildHighlight(text, duration, data, sr) {
 
   const real = chunks.filter((c) => c.mora > 0);
   if (!real.length) { hlSegs = null; return; }
-  const totalMora = real.reduce((s, c) => s + c.mora, 0);
-  const clock = data ? makeEnergyClock(data, sr) : (f) => f * duration;
+  real[0].period = false; // 첫 문장 앞엔 쉼 없음(trim됨)
 
-  const segs = [];
-  let cum = 0;
-  for (const c of real) {
-    segs.push({ a: c.a, b: c.b, start: clock(cum / totalMora) });
-    cum += c.mora;
+  // 시간 비례 폴백(파형 없음)
+  if (!data) {
+    const totalMora = real.reduce((s, c) => s + c.mora, 0);
+    const segs = []; let cum = 0;
+    for (const c of real) { segs.push({ a: c.a, b: c.b, start: (cum / totalMora) * duration }); cum += c.mora; }
+    hlSegs = segs; return;
   }
-  // 쉼(.,) 직후 덩어리가 무음 도중에 켜지지 않도록, 무음에 걸친 시작을 쉼 끝으로 민다.
-  if (data) {
-    const gaps = detectGaps(data, sr, 0.08);
-    for (const s of segs) {
-      for (const [g0, g1] of gaps) { if (s.start >= g0 - 0.02 && s.start < g1) { s.start = g1; break; } }
+
+  const prof = makeEnergyProfile(data, sr);
+  // 마침표 문장 경계(real 인덱스)를, 탐지한 긴 무음(0.12s↑: 마침표 ~0.24s만, 쉼표·촉음 제외)에
+  // 위치 순으로 못박는다. (개수가 어긋나면 가능한 만큼만.)
+  const bounds = []; for (let i = 1; i < real.length; i++) if (real[i].period) bounds.push(i);
+  let anchors = [];
+  if (bounds.length) {
+    const gaps = detectGaps(data, sr, 0.12);
+    const m = Math.min(gaps.length, bounds.length);
+    anchors = gaps.slice().sort((x, y) => (y[1] - y[0]) - (x[1] - x[0])).slice(0, m).sort((x, y) => x[0] - y[0]);
+  }
+  const P = anchors.length;
+
+  // 문장 s = real[lo..hi]. 오디오 구간 [Ta,Tb] 안에서 그 문장의 에너지만으로 분배.
+  const segs = [];
+  for (let s = 0; s <= P; s++) {
+    const lo = s === 0 ? 0 : bounds[s - 1];
+    const hi = s === P ? real.length - 1 : bounds[s] - 1;
+    const Ta = s === 0 ? 0 : anchors[s - 1][1];        // 직전 무음 끝
+    const Tb = s === P ? duration : anchors[s][0];     // 다음 무음 시작
+    const Ea = prof.energyAtTime(Ta), Eb = prof.energyAtTime(Tb);
+    let M = 0; for (let i = lo; i <= hi; i++) M += real[i].mora;
+    let c = 0;
+    for (let i = lo; i <= hi; i++) {
+      const e = Ea + (M > 0 ? c / M : 0) * (Eb - Ea);
+      segs.push({ a: real[i].a, b: real[i].b, start: prof.timeAtEnergy(e) });
+      c += real[i].mora;
     }
   }
   hlSegs = segs;
