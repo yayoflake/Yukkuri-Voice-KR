@@ -942,6 +942,37 @@ playKanaBtn.addEventListener('click', () => playKana(kanaEl.value, playKanaBtn))
 // 음성을 바꾸면 재생 중인 소리는 멈춤
 voiceEl.addEventListener('change', () => { if (currentSource) { stopPlayback(); resetPlayUI(); } });
 
+// 편집 칸 복사: 클립보드에 가나 칸 내용을 복사하고, 잠깐 강조색으로 피드백을 준다.
+const copyKanaBtn = $('copykana');
+copyKanaBtn.addEventListener('click', async () => {
+  const text = kanaEl.value;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // clipboard API 미지원/거부 시 폴백
+    const sel = { s: kanaEl.selectionStart, e: kanaEl.selectionEnd };
+    kanaEl.focus(); kanaEl.select();
+    try { document.execCommand('copy'); } catch { /* 무시 */ }
+    kanaEl.setSelectionRange(sel.s, sel.e);
+  }
+  copyKanaBtn.classList.add('copied');
+  setTimeout(() => copyKanaBtn.classList.remove('copied'), 900);
+});
+
+// 예제 뱃지: 누르면 한국어 입력창·편집 칸에 예문을 채우고 곧바로 (고급) 재생한다.
+const exampleList = $('examplelist');
+exampleList.addEventListener('click', (e) => {
+  const b = e.target.closest('.example-badge');
+  if (!b || busy) return;
+  textEl.value = b.dataset.ko;
+  setKanaValue(displayKana(koreanKana())); // 한국어 → 가타카나(히라가나 모드면 히라가나)
+  updateKanaRead();
+  kanaDirty = false;
+  if (currentSource) { stopPlayback(); resetPlayUI(); } // 재생 중이면 멈추고 새 예문 재생
+  playKana(kanaEl.value, playKanaBtn);
+});
+
 // ── 가나 키보드 ───────────────────────────────────────────────────
 // 청음/탁음·반탁음/작은가나·기호를 탭으로 나눠 한 화면당 키 수를 줄이고 키를 키운다.
 // 키는 가나 칸의 (기억해 둔) 커서 위치에 삽입. ⌫는 커서 앞 한 글자 삭제.
