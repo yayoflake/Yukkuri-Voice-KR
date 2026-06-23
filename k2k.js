@@ -164,13 +164,19 @@ function tokenize(text) {
       tokens.push({ type: 'raw', kana: '/' });
       lastSyl = null;
       pendingBoundary = false;
-    } else if (ch === '\n' || ch === '\r') {
-      // 줄바꿈은 마침표 . 로 변환한다(재생 시 。 쉼이 됨). 연속 줄바꿈(빈 줄)이어도
-      // 앞이 이미 . 로 끝나는 구두점(. 이나 ?.)이면 중복 생성하지 않는다.
+    } else if (ch === '\n') {
+      // 줄바꿈: 마침표(재생 시 。 쉼)로 끊되, 입력의 줄 구조를 변환결과에도 그대로 남긴다
+      // (읽기 편하게). 이미 . 로 끝나는 구두점(. 이나 ?.) 뒤면 마침표는 더하지 않고 줄바꿈만,
+      // 이미 줄바꿈으로 끝나면(빈 줄) 줄바꿈만 누적한다.
       const prev = prevSep();
-      if (!(prev && prev.kana.endsWith('.'))) tokens.push({ type: 'sep', kana: '.' });
+      if (prev && prev.kana.endsWith('.')) prev.kana += '\n';
+      else if (prev && prev.kana.endsWith('\n')) prev.kana += '\n';
+      else tokens.push({ type: 'sep', kana: '.\n' });
       lastSyl = null;
       pendingBoundary = false;
+    } else if (ch === '\r') {
+      // 캐리지리턴은 무시 (\r\n 줄바꿈은 위 \n 분기에서 한 번만 처리)
+      continue;
     } else if (/\s/.test(ch)) {
       // 일반 공백(스페이스·탭)은 어절 경계로만 본다. 다음 음절에 boundaryBefore를 달아
       // 연음을 절음(받침→대표음 후 연음)으로 처리하고(샤인머스캣 알아 → …ケダラ),
@@ -194,8 +200,9 @@ function tokenize(text) {
       lastSyl = null;
       pendingBoundary = false;
     } else if (',、·､'.includes(ch)) {
-      // 쉼표류는 , 로 변환한다(재생 시 、 짧은 쉼).
-      tokens.push({ type: 'sep', kana: ',' });
+      // 쉼표류는 ,,, 로 변환한다. 한 번의 쉼표를 짧은 쉼 3겹(、、、)으로 늘려, 읽을 때
+      // 또렷이 끊기게 한다(재생 시 짧은 쉼이 누적돼 ,의 3배 길이).
+      tokens.push({ type: 'sep', kana: ',,,' });
       lastSyl = null;
       pendingBoundary = false;
     }

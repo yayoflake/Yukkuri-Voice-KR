@@ -1,6 +1,6 @@
 // app.js — UI 글루: 한국어 → 가타카나 변환 후 AquesTalk1로 합성/재생
 import { load } from './vendor/aquestalk.bundle.js';
-import { koreanToKatakana, hiraToKata, normalizeProsody } from './k2k.js?v=20260623c';
+import { koreanToKatakana, hiraToKata, kataToHira, normalizeProsody } from './k2k.js?v=20260624a';
 import { normalizeNumbers } from './numread.js?v=20260621';
 import { katakanaToKorean } from './k2h.js?v=20260622';
 
@@ -22,6 +22,12 @@ const kbToggle = $('kbtoggle');    // 가나 키보드 열기
 const kbdEl = $('kbd');            // 가나 키보드 팝오버
 const kbdTabs = $('kbdtabs');      // 탭(청음/탁음/작은가나)
 const kbdBody = $('kbdbody');      // 탭별 키 그리드가 들어갈 영역
+const hiraToggle = $('hiratoggle'); // 히라가나 표시 토글
+
+// 히라가나 표시 모드: 켜면 예시·키보드·편집창의 가타카나를 전부 히라가나로 보여준다.
+// (합성은 어차피 hiraToKata로 가타카나화하므로 편집창 내용이 히라가나여도 그대로 재생된다.)
+let hiragana = false;
+const displayKana = (s) => (hiragana ? kataToHira(s) : s);
 
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
@@ -112,7 +118,7 @@ const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => HTML_ESC[c]);
 // 덩어리를 끊는 구분 기호. / 는 악센트구, 공백·x 는 경계, . , 。 、 는 쉼.
 const HL_SEP = new Set(['/', '／', '.', ',', '。', '、', 'x', 'X', 'ｘ', 'Ｘ', ' ', '\t', '\n', '\r']);
 // 덩어리 안에서 한 글자가 차지하는 박자(모라). 장음(-ー)도 포함, 작은가나는 0(앞과 한 모라).
-const HL_SMALL = 'ァィゥェォャュョ';
+const HL_SMALL = 'ァィゥェォャュョぁぃぅぇぉゃゅょ';
 function hlMora(ch) {
   if (ch === 'ー' || ch === '-') return 1;
   if (HL_SMALL.includes(ch)) return 0;
@@ -311,7 +317,7 @@ function updateKanaRead() {
 
 // 한국어 입력이 바뀌면 가나 칸을 새로 채운다 (변환결과 표시 + 고급 편집의 출발점)
 function regenerate() {
-  kanaEl.value = koreanKana();
+  kanaEl.value = displayKana(koreanKana());
   updateKanaRead();
 }
 
@@ -933,7 +939,33 @@ kbdBody.addEventListener('mousedown', (e) => {
   if (!b) return;
   e.preventDefault();
   if (b.dataset.k === '⌫') backspaceKana();
-  else insertKana(b.dataset.k);
+  else insertKana(displayKana(b.dataset.k));
+});
+
+// 히라가나 토글: 켜고 끌 때 키보드 라벨·예시·편집창을 한꺼번에 가타카나↔히라가나로 바꾼다.
+// dataset.k(키 정체)는 가타카나로 두고, 보이는 .k 라벨과 삽입 문자만 모드를 따른다.
+const exampleCodes = [...document.querySelectorAll('.examples code')]
+  .map((el) => ({ el, kata: el.textContent }));
+
+function refreshKeyboardLabels() {
+  for (const b of kbdBody.querySelectorAll('button[data-k]')) {
+    const k = b.querySelector('.k');
+    if (k) k.textContent = displayKana(b.dataset.k);
+  }
+}
+function refreshExamples() {
+  for (const { el, kata } of exampleCodes) el.textContent = displayKana(kata);
+}
+
+hiraToggle.addEventListener('click', () => {
+  hiragana = !hiragana;
+  hiraToggle.classList.toggle('active', hiragana);
+  hiraToggle.setAttribute('aria-pressed', String(hiragana));
+  // 편집창 내용도 현재 모드로 변환 (양방향 가역 변환이라 안전)
+  kanaEl.value = hiragana ? kataToHira(kanaEl.value) : hiraToKata(kanaEl.value);
+  updateKanaRead();
+  refreshKeyboardLabels();
+  refreshExamples();
 });
 
 // 첫 로드 시 기본 한국어를 변환해 변환결과 칸을 채운다

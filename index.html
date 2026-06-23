@@ -71,6 +71,14 @@
   .switch.active .track { background:var(--accent); }
   .switch:hover:not(:disabled) .track { filter:brightness(.97); }
   .switch.active .knob { left:18px; }
+  .kana-tools { display:flex; align-items:center; gap:8px; }
+  .hira-toggle {
+    margin:0; width:auto; padding:5px 11px; display:inline-flex; align-items:center;
+    font-size:16px; font-weight:700; line-height:1;
+    border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--muted); transition:none;
+  }
+  .hira-toggle:hover:not(:disabled) { background:#f0ebe0; }
+  .hira-toggle.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .kb-toggle {
     margin:0; width:auto; padding:6px 9px; display:inline-flex; align-items:center;
     border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--muted); transition:none;
@@ -137,6 +145,14 @@
     background:#f4efe4; border-radius:8px; word-break:break-all; white-space:pre-wrap;
   }
   .hint { margin:8px 2px 0; font-size:12px; line-height:1.5; color:var(--muted); }
+  .hint > summary {
+    cursor:pointer; font-size:12px; font-weight:600; color:var(--accent2);
+    list-style:none; padding:2px 0; user-select:none;
+  }
+  .hint > summary::-webkit-details-marker { display:none; }
+  .hint > summary::before { content:'▸ '; }
+  .hint[open] > summary::before { content:'▾ '; }
+  .hint > summary + .syntax { margin-top:8px; }
   .hint code { background:#f0ebe0; border-radius:4px; padding:1px 5px; font-size:12px; }
   .hint .syntax, .hint .examples { display:flex; flex-wrap:wrap; gap:5px 14px; }
   .hint .examples { margin-top:8px; align-items:baseline; }
@@ -164,29 +180,34 @@
 
     <div class="kana-wrap">
       <div class="kana-head">
-        <label for="kana">고급 편집</label>
-        <div class="kb-wrap">
-          <button type="button" id="kbtoggle" class="kb-toggle" aria-label="가나 키보드" title="가나 키보드">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="2" y="6" width="20" height="12" rx="2" />
-              <line x1="6" y1="10" x2="6" y2="10" />
-              <line x1="10" y1="10" x2="10" y2="10" />
-              <line x1="14" y1="10" x2="14" y2="10" />
-              <line x1="18" y1="10" x2="18" y2="10" />
-              <line x1="8" y1="14" x2="16" y2="14" />
-            </svg>
-          </button>
-          <div class="kbd" id="kbd" hidden>
-            <div class="kbd-tabs" id="kbdtabs"></div>
-            <div class="kbd-scroll" id="kbdbody"></div>
+        <label for="kana">편집</label>
+        <div class="kana-tools">
+          <button type="button" id="hiratoggle" class="hira-toggle" role="switch"
+                  aria-pressed="false" title="히라가나로 표시 (예시·키보드·편집창)">あ</button>
+          <div class="kb-wrap">
+            <button type="button" id="kbtoggle" class="kb-toggle" aria-label="가나 키보드" title="가나 키보드">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <line x1="6" y1="10" x2="6" y2="10" />
+                <line x1="10" y1="10" x2="10" y2="10" />
+                <line x1="14" y1="10" x2="14" y2="10" />
+                <line x1="18" y1="10" x2="18" y2="10" />
+                <line x1="8" y1="14" x2="16" y2="14" />
+              </svg>
+            </button>
+            <div class="kbd" id="kbd" hidden>
+              <div class="kbd-tabs" id="kbdtabs"></div>
+              <div class="kbd-scroll" id="kbdbody"></div>
+            </div>
           </div>
         </div>
       </div>
       <textarea id="kana" placeholder="▼ 변환을 누르면 결과가 표시됩니다."></textarea>
       <div class="kana-view" id="kanaview" aria-hidden="true" hidden></div>
       <div class="kana-read" id="kanaread" aria-live="polite" title="가나 칸의 한국어 읽기"></div>
-      <div class="hint">
+      <details class="hint">
+        <summary>문법 · 예시</summary>
         <div class="syntax">
           <span><code>/</code> 악센트 구분자</span>
           <span><code>'</code> 억양 내림</span>
@@ -209,7 +230,7 @@
           <span><code>ボイスxインニダ</code></span>
           <span><code>マッテ...ネ</code> <code>アノ,,,エート</code> (쉼표 중첩 가능)</span>
         </div>
-      </div>
+      </details>
 
       <div class="row">
         <div>
@@ -236,6 +257,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260624l"></script>
+  <script type="module" src="./app.js?v=20260624m"></script>
 </body>
 </html>
