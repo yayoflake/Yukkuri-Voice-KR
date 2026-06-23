@@ -26,6 +26,7 @@
     border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--text);
     font-family:inherit; line-height:1.5;
   }
+  #text { min-height:150px; }
   textarea:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-top:6px; }
   .row > div { flex:1 1 140px; }
@@ -44,11 +45,8 @@
   button:disabled { opacity:.55; cursor:default; }
   .play-row { display:flex; gap:10px; margin-top:18px; }
   .play-row button { margin-top:0; }
-  .play-row #play { flex:1; }
-  .convert-btn {
-    flex:none; width:auto; padding:13px 20px;
-    color:var(--text); background:#e3ddcf;
-  }
+  .play-row #play { flex:none; width:auto; padding:13px 18px; font-size:14px; }
+  .convert-btn { flex:1; color:var(--text); background:#e3ddcf; }
   .convert-btn:hover:not(:disabled) { background:#d6cfbd; }
   .kana-wrap { margin-top:24px; }
   .kana-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
@@ -148,11 +146,11 @@
     <h1>윳쿠리 보이스 🗣️</h1>
     <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
 
-    <label for="text">읽을 한국어</label>
+    <label for="text">한국어 입력</label>
     <textarea id="text" placeholder="예) 안녕하세요. 만나서 반갑습니다.">안녕하세요. 윳쿠리 보이스입니다.</textarea>
     <button type="button" id="autoslash" class="switch active" role="switch"
             aria-pressed="true" title="띄어쓰기를 악센트구 구분자 / 로 자동 변환">
-      <span class="track"><span class="knob"></span></span>자동 구분자
+      <span class="track"><span class="knob"></span></span>자동 구분자("/")
     </button>
 
     <div class="play-row">
@@ -187,10 +185,10 @@
       <div class="kana-view" id="kanaview" aria-hidden="true" hidden></div>
       <div class="kana-read" id="kanaread" aria-live="polite" title="가나 칸의 한국어 읽기"></div>
       <p class="hint">
-        억양: 음 내려가는 자리에 <code>'</code> &nbsp;·&nbsp; 장음(길게): <code>-</code> 또는 <code>ー</code><br>
-        구간 속도(50~300): <code>[숫자]</code> &nbsp;·&nbsp; 구간 피치(반음 -12~+12): <code>{+숫자}</code><br>
-        피치 한 단계 올림/내림: <code>&gt;</code> / <code>&lt;</code> (상대·누적) &nbsp;·&nbsp; 억양 초기화(쉼 없이): <code>x</code><br>
-        예) <code>コンニチ'ハ</code>, <code>ヤ-</code>, <code>[120]オハヨ[250]ゴザイマス</code>, <code>&gt;ユックリ&lt;ボイス</code>, <code>ボイスxインニダ</code>
+        <code>/</code> 악센트구 구분 &nbsp;·&nbsp; <code>'</code> 억양 내림 &nbsp;·&nbsp; <code>-</code> 장음<br>
+        <code>[숫자]</code> 속도 50~300 &nbsp;·&nbsp; <code>{반음}</code> 피치 -12~+12<br>
+        <code>&gt;</code> <code>&lt;</code> 피치 반음 올림/내림(누적) &nbsp;·&nbsp; <code>x</code> 억양 초기화(쉼 없이)<br>
+        예) <code>オハヨ/ゴザイマス</code> · <code>コンニチ'ハ</code> · <code>ヤ-</code> · <code>[250]ハヤク</code> · <code>{+4}タカク</code> · <code>&gt;ユックリ&lt;</code> · <code>ボイスxインニダ</code>
       </p>
 
       <div class="row">
@@ -218,6 +216,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260624a"></script>
+  <script type="module" src="./app.js?v=20260624b"></script>
 </body>
 </html>
