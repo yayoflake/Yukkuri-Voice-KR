@@ -32,8 +32,10 @@ const displayKana = (s) => (hiragana ? kataToHira(s) : s);
 // 음성 자산(zip/wasm)이 들어있는 폴더
 const VOICES_BASE = new URL('voices/', document.baseURI).href;
 
-// 현재 로드된 AquesTalk 인스턴스 (음성당 ~1GB라 한 번에 하나만 유지)
-let current = null;        // { voice, aq }
+// 로드된 AquesTalk 인스턴스 캐시. 인스턴스 하나가 v86 에뮬 ~64MB라 몇 개는 동시에 들 수 있다.
+// (음성)코드 태그로 한 문장에 여러 음성을 쓸 때 매번 재로드하지 않도록 LRU로 몇 개 유지한다.
+const voiceCache = new Map(); // voice → aq (Map 삽입순 = 사용순, 맨 앞이 가장 오래됨)
+const VOICE_CACHE_MAX = 4;
 let busy = false;          // 로드/합성 중 (이때 버튼은 잠금)
 let audioCtx = null;       // Web Audio 컨텍스트 (구간 합성 결과를 이어붙여 재생)
 let currentSource = null;  // 재생 중인 BufferSource (있으면 = 재생 중)
@@ -344,16 +346,55 @@ function regenerate() {
   kanaDirty = false;
 }
 
-// 선택된 음성 인스턴스 확보 (필요하면 로드, 음성이 바뀌면 이전 것 해제)
+// 음성 인스턴스 확보. 캐시에 있으면 재사용(최근 사용으로 갱신), 없으면 로드.
+// 캐시가 한도를 넘으면 가장 오래 안 쓴 것부터 해제한다.
 async function ensureVoice(voice) {
-  if (current && current.voice === voice) return current.aq;
-  if (current) {
-    const old = current; current = null;
-    try { await old.aq.destroy(); } catch { /* 무시 */ }
+  const hit = voiceCache.get(voice);
+  if (hit) { voiceCache.delete(voice); voiceCache.set(voice, hit); return hit; } // LRU 갱신
+  while (voiceCache.size >= VOICE_CACHE_MAX) {
+    const oldest = voiceCache.keys().next().value;
+    const old = voiceCache.get(oldest); voiceCache.delete(oldest);
+    try { await old.destroy(); } catch { /* 무시 */ }
   }
   const aq = await load(voice, { baseUrl: VOICES_BASE });
-  current = { voice, aq };
+  voiceCache.set(voice, aq);
   return aq;
+}
+
+// ── (음성) 코드 태그 ──────────────────────────────────────────────
+// (code)로 그 자리부터 음성을 바꾼다. 유효 코드는 음성 드롭다운 값(f1 m1 dvd …)과 동일.
+//   예) (f2)コンニチ'ハ(m1)ゲンキ?  → 앞은 f2, 뒤는 m1로 합성.
+// AquesTalk1엔 음성 전환 기능이 없으므로, 음성별 구간으로 잘라 각 구간을 해당 음성으로 따로
+// 합성한 뒤 이어 붙인다(음성이 다르면 어차피 인스턴스가 달라 따로 합성해야 한다).
+const VOICE_CODES = new Set([...voiceEl.options].map((o) => o.value));
+// kana를 음성 구간 [{voice, text}]로 나눈다. (code) 형태 태그는 제거하고, 유효한 코드일 때만
+// 음성을 바꾼다(오타는 태그만 제거 → AquesTalk에 괄호가 안 넘어감). 이웃 같은 음성 구간은 합친다.
+function splitVoiceSpans(kana, defaultVoice) {
+  const re = /\(([A-Za-z0-9]{1,4})\)/g;
+  const spans = [];
+  let voice = defaultVoice, last = 0, m;
+  const push = (t) => {
+    if (!t) return;
+    const prev = spans[spans.length - 1];
+    if (prev && prev.voice === voice) prev.text += t;
+    else spans.push({ voice, text: t });
+  };
+  while ((m = re.exec(kana)) !== null) {
+    push(kana.slice(last, m.index));
+    last = re.lastIndex;
+    const code = m[1].toLowerCase();
+    if (VOICE_CODES.has(code)) voice = code; // 유효 코드만 음성 전환, 오타((f3) 등)는 태그만 제거
+  }
+  push(kana.slice(last));
+  // 태그 없는 일반 입력이면 push가 전체를 담아 spans가 비지 않는다. spans가 비는 건 입력이
+  // 통째로 (음성)태그뿐일 때뿐 — 그땐 읽을 게 없으니 빈 텍스트 한 구간(소리 없음)으로 둔다.
+  return spans.length ? spans : [{ voice, text: '' }];
+}
+// prefix(@ 앞부분)의 마지막 유효 (음성)코드 = @ 시점에 켜져 있던 음성. 없으면 기본값.
+function voiceAt(prefix, defaultVoice) {
+  const re = /\(([A-Za-z0-9]{1,4})\)/g; let v = defaultVoice, m;
+  while ((m = re.exec(prefix)) !== null) { const c = m[1].toLowerCase(); if (VOICE_CODES.has(c)) v = c; }
+  return v;
 }
 
 // ── 구간별 속도·피치 ──────────────────────────────────────────────
@@ -705,13 +746,13 @@ function dropDanglingSokuon(s) {
   const out = [];
   for (let i = 0; i < a.length; i++) {
     if (a[i] === 'ッ') {
-      // 뒤따르는 운율기호('><)·구간태그([..]{..})를 건너뛰고 다음 가나를 본다.
+      // 뒤따르는 운율기호('><)·구간태그([..]{..})·음성태그((..))를 건너뛰고 다음 가나를 본다.
       let j = i + 1;
       while (j < a.length) {
         const c = a[j];
         if (c === "'" || c === '>' || c === '<') { j++; continue; }
-        if (c === '[' || c === '{') {
-          const close = c === '[' ? ']' : '}';
+        if (c === '[' || c === '{' || c === '(') {
+          const close = c === '[' ? ']' : c === '{' ? '}' : ')';
           while (j < a.length && a[j] !== close) j++;
           j++; continue;
         }
@@ -782,14 +823,16 @@ async function playKana(kana, btn) {
   // 공백문자(스페이스·탭·줄바꿈)는 합성에서 의미가 없으므로 모두 제거한다.
   // @ : '여기서부터 재생'. @ 뒤(여러 개면 마지막 @ 기준)만 합성해, 중간을 편집하고도
   //     매번 처음부터 듣지 않게 한다. (@ 자체는 빠지고, 하이라이트도 @ 뒤만 칠한다 → buildHighlight)
-  //     단, @ 앞에서 지정한 속도·피치([속도] {반음} > <)는 @ 시점의 누적 상태로 이어받아
-  //     재생한다. parseSegments로 prefix의 태그를 끝까지 훑어 마지막 상태를 얻는다(x는 일반 글자
-  //     취급이라 속도/피치 누적엔 영향 없음 — x는 억양 리셋만).
-  let atInit = null;
+  //     단, @ 앞에서 지정한 속도·피치([속도] {반음} > <)와 음성((코드))은 @ 시점 상태를
+  //     이어받아 재생한다. parseSegments/voiceAt로 prefix를 끝까지 훑어 마지막 상태를 얻는다
+  //     (x는 일반 글자 취급이라 속도/피치 누적엔 영향 없음 — x는 억양 리셋만).
+  let atInit = null, atVoice = null;
   const atPos = kana.lastIndexOf('@');
   if (atPos >= 0) {
-    const pre = parseSegments(kana.slice(0, atPos), Number(speedEl.value));
+    const prefix = kana.slice(0, atPos);
+    const pre = parseSegments(prefix, Number(speedEl.value));
     atInit = { speed: pre.speed, semis: pre.semis };
+    atVoice = voiceAt(prefix, voiceEl.value);
     kana = kana.slice(atPos + 1);
   }
 
@@ -809,34 +852,37 @@ async function playKana(kana, btn) {
   // 1) 음성 로드 + (x로 끊긴) 단위별 합성·후처리 후 이어붙이기 (실제 실패가 날 수 있는 구간)
   let buffer;
   try {
-    const aq = await ensureVoice(voiceEl.value);
     const ctx = getCtx();
     if (ctx.state === 'suspended') await ctx.resume();
     const baseSpeed = Number(speedEl.value);
     const sr = ctx.sampleRate;
 
-    // x(초기화·무쉼 경계)로 합성 단위를 나눈다. 단위마다 따로 합성해 억양을 리셋하고,
-    // 쉼 없이 크로스페이드로 잇는다. x가 없으면 단위 하나(기존과 동일).
-    // x 경계에 붙은 쉼(,,, 등)은 합성하면 무음→trim으로 증발하므로, 명시적 무음으로 끼운다.
-    const units = kana.split(/[xXｘＸ]/);
+    // (음성)코드로 음성 구간을 나누고, 각 구간 안에서 다시 x(억양 리셋·무쉼 경계)로 합성 단위를
+    // 나눈다. 단위마다 따로 합성해 억양을 리셋하고 쉼 없이 크로스페이드로 잇는다. 속도·피치
+    // 상태(state)와 누적 쉼(pending)은 구간·단위 경계를 넘어 이어진다(태그 없으면 기존과 동일).
+    const spans = splitVoiceSpans(kana, atVoice || voiceEl.value);
     const items = [];
     let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
-    let state = atInit || { speed: baseSpeed, semis: 0 }; // x 경계·@ 시작을 넘어 이어지는 속도·누적 피치
-    for (const u of units) {
-      const { lead, core, trail } = splitPause(u);
-      pending += lead;
-      let m = null;
-      if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
-      if (m && m.length) {
-        if (items.length && pending > 0) {
-          items.push({ data: silenceArr(pending, sr), fade: false }); // 쉼 → 무음 삽입
-          items.push({ data: m, fade: false });
+    let state = atInit || { speed: baseSpeed, semis: 0 }; // 경계 넘어 이어지는 속도·누적 피치
+    for (const span of spans) {
+      const aq = await ensureVoice(span.voice);
+      // x 경계에 붙은 쉼(,,, 등)은 합성하면 무음→trim으로 증발하므로, 명시적 무음으로 끼운다.
+      for (const u of span.text.split(/[xXｘＸ]/)) {
+        const { lead, core, trail } = splitPause(u);
+        pending += lead;
+        let m = null;
+        if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
+        if (m && m.length) {
+          if (items.length && pending > 0) {
+            items.push({ data: silenceArr(pending, sr), fade: false }); // 쉼 → 무음 삽입
+            items.push({ data: m, fade: false });
+          } else {
+            items.push({ data: m, fade: items.length > 0 }); // 0갭 경계 → 크로스페이드
+          }
+          pending = trail;
         } else {
-          items.push({ data: m, fade: items.length > 0 }); // 0갭 x 경계 → 크로스페이드
+          pending += trail; // 합성할 게 없으면(순수 쉼 단위 등) 쉼만 누적
         }
-        pending = trail;
-      } else {
-        pending += trail; // 합성할 게 없으면(순수 쉼 단위 등) 쉼만 누적
       }
     }
     const merged = concatItems(items, sr);
