@@ -652,18 +652,17 @@ async function synthUnit(aq, ctx, unitKana, baseSpeed, init) {
   const decoded = await ctx.decodeAudioData(toArrayBuffer(aq.run(fullKana, baseSpeed)));
   const sr = decoded.sampleRate;
   const data = retimePauses(trimEnds(decoded.getChannelData(0), sr), sr, fullKana);
-  // 구간을 모라 비례로 입력시각에 매핑해 표본별 피치(반음)·속도 파라미터를 만든다.
-  const weights = segs.map((s, i) =>
-    moraSum(i === segs.length - 1 ? s.text.replace(/[。、\s]+$/u, '') : s.text));
-  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  // 구간 경계를 글자→샘플 매핑(쉼은 고정 길이, 발음은 모라 비례)으로 찍어 표본별 피치(반음)·
+  // 속도 파라미터를 만든다. 쉼표가 중첩돼도 쉼 길이를 정확히 반영해 전환 타이밍이 안 밀린다.
   const M = data.length;
+  const map = charSampleMap(fullKana, M, sr);
   const semisArr = new Float32Array(M);
   const tsArr = new Float32Array(M).fill(1);
-  let cum = 0, changed = false;
+  let cp = 0, changed = false;
   for (let i = 0; i < segs.length; i++) {
-    const startS = Math.round((cum / total) * M);
-    cum += weights[i];
-    const endS = i === segs.length - 1 ? M : Math.round((cum / total) * M);
+    const startS = Math.round(map[cp]);
+    cp += [...segs[i].text].length;
+    const endS = i === segs.length - 1 ? M : Math.round(map[cp]);
     const ts = baseSpeed / segs[i].speed;
     for (let n = startS; n < endS; n++) { semisArr[n] = segs[i].semis; tsArr[n] = ts; }
     if (segs[i].semis !== 0 || segs[i].speed !== baseSpeed) changed = true;
