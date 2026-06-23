@@ -717,8 +717,16 @@ async function playKana(kana, btn) {
   // 공백문자(스페이스·탭·줄바꿈)는 합성에서 의미가 없으므로 모두 제거한다.
   // @ : '여기서부터 재생'. @ 뒤(여러 개면 마지막 @ 기준)만 합성해, 중간을 편집하고도
   //     매번 처음부터 듣지 않게 한다. (@ 자체는 빠지고, 하이라이트도 @ 뒤만 칠한다 → buildHighlight)
+  //     단, @ 앞에서 지정한 속도·피치([속도] {반음} > <)는 @ 시점의 누적 상태로 이어받아
+  //     재생한다. parseSegments로 prefix의 태그를 끝까지 훑어 마지막 상태를 얻는다(x는 일반 글자
+  //     취급이라 속도/피치 누적엔 영향 없음 — x는 억양 리셋만).
+  let atInit = null;
   const atPos = kana.lastIndexOf('@');
-  if (atPos >= 0) kana = kana.slice(atPos + 1);
+  if (atPos >= 0) {
+    const pre = parseSegments(kana.slice(0, atPos), Number(speedEl.value));
+    atInit = { speed: pre.speed, semis: pre.semis };
+    kana = kana.slice(atPos + 1);
+  }
 
   kana = normalizeProsody(hiraToKata(kana))
     .replace(/\./g, '。')
@@ -748,7 +756,7 @@ async function playKana(kana, btn) {
     const units = kana.split(/[xXｘＸ]/);
     const items = [];
     let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
-    let state = { speed: baseSpeed, semis: 0 }; // x 경계를 넘어 이어지는 속도·누적 피치
+    let state = atInit || { speed: baseSpeed, semis: 0 }; // x 경계·@ 시작을 넘어 이어지는 속도·누적 피치
     for (const u of units) {
       const { lead, core, trail } = splitPause(u);
       pending += lead;
