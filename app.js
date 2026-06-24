@@ -981,7 +981,10 @@ exampleList.addEventListener('click', (e) => {
   textEl.value = b.dataset.ko || '';
   // data-kana가 있으면 그 가나를 그대로(운율 태그 보존), 없으면 한국어를 변환해 편집 칸에 넣는다.
   const kana = b.dataset.kana != null ? b.dataset.kana : koreanKana();
-  setKanaValue(displayKana(kana)); // 히라가나 모드면 표시만 히라가나로
+  // setKanaValue는 undo 보존을 위해 편집창에 포커스를 주는데(execCommand), 예제 버튼에선
+  // 그 포커스 때문에 모바일 키보드가 튄다. 예제는 통째로 덮어쓰는 거라 undo가 굳이 필요 없으니
+  // 포커스 없이 값만 직접 넣는다.
+  kanaEl.value = displayKana(kana); // 히라가나 모드면 표시만 히라가나로
   updateKanaRead();
   kanaDirty = false;
   if (currentSource) { stopPlayback(); resetPlayUI(); } // 재생 중이면 멈추고 새 예문 재생
