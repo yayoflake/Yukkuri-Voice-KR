@@ -346,19 +346,37 @@ function regenerate() {
   kanaDirty = false;
 }
 
+// 진행 중인 로드 Promise(voice→Promise). 예열과 재생이 동시에 같은 음성을 요청해도
+// v86를 두 번 부팅하지 않도록 같은 Promise를 공유한다.
+const voiceLoading = new Map();
+
 // 음성 인스턴스 확보. 캐시에 있으면 재사용(최근 사용으로 갱신), 없으면 로드.
 // 캐시가 한도를 넘으면 가장 오래 안 쓴 것부터 해제한다.
 async function ensureVoice(voice) {
   const hit = voiceCache.get(voice);
   if (hit) { voiceCache.delete(voice); voiceCache.set(voice, hit); return hit; } // LRU 갱신
-  while (voiceCache.size >= VOICE_CACHE_MAX) {
-    const oldest = voiceCache.keys().next().value;
-    const old = voiceCache.get(oldest); voiceCache.delete(oldest);
-    try { await old.destroy(); } catch { /* 무시 */ }
-  }
-  const aq = await load(voice, { baseUrl: VOICES_BASE });
-  voiceCache.set(voice, aq);
-  return aq;
+  const inflight = voiceLoading.get(voice);
+  if (inflight) return inflight; // 같은 음성 이미 로드 중(예열 등) → 그 Promise 공유
+  const p = (async () => {
+    while (voiceCache.size >= VOICE_CACHE_MAX) {
+      const oldest = voiceCache.keys().next().value;
+      const old = voiceCache.get(oldest); voiceCache.delete(oldest);
+      try { await old.destroy(); } catch { /* 무시 */ }
+    }
+    const aq = await load(voice, { baseUrl: VOICES_BASE });
+    voiceCache.set(voice, aq);
+    return aq;
+  })();
+  voiceLoading.set(voice, p);
+  try { return await p; } finally { voiceLoading.delete(voice); }
+}
+
+// 예열: 무거운 v86 부팅(2MB wasm + 메모리 할당)을 사용자가 타이핑하는 동안 미리 끝내,
+// 첫 재생 시 멈칫거림을 없앤다. 합성 중(busy)이거나 이미 준비됐으면 건너뛴다.
+// 실패는 조용히 무시한다(실제 재생 때 정식 경로에서 다시 시도·표시).
+function preloadVoice(voice = voiceEl.value) {
+  if (busy || voiceCache.has(voice) || voiceLoading.has(voice)) return;
+  ensureVoice(voice).catch(() => {});
 }
 
 // ── (음성) 코드 태그 ──────────────────────────────────────────────
@@ -940,7 +958,7 @@ playBtn.addEventListener('click', () => playKana(koreanKana(), playBtn));
 // 아래쪽(고급): 가나 칸을 그대로(직접 넣은 ' / 포함) 재생
 playKanaBtn.addEventListener('click', () => playKana(kanaEl.value, playKanaBtn));
 // 음성을 바꾸면 재생 중인 소리는 멈춤
-voiceEl.addEventListener('change', () => { if (currentSource) { stopPlayback(); resetPlayUI(); } });
+voiceEl.addEventListener('change', () => { if (currentSource) { stopPlayback(); resetPlayUI(); } preloadVoice(); });
 
 // 편집 칸 복사: 클립보드에 가나 칸 내용을 복사하고, 잠깐 강조색으로 피드백을 준다.
 const copyKanaBtn = $('copykana');
@@ -1156,3 +1174,7 @@ hiraToggle.addEventListener('click', () => {
 
 // 첫 로드 시 기본 한국어를 변환해 변환결과 칸을 채운다
 regenerate();
+
+// 기본 음성을 백그라운드로 예열한다(첫 페인트는 막지 않도록 idle/다음 틱에).
+// 사용자가 타이핑하는 동안 v86 부팅이 끝나, 첫 재생 버튼이 바로 소리를 낸다.
+(window.requestIdleCallback || ((fn) => setTimeout(fn, 200)))(() => preloadVoice());
