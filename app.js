@@ -939,13 +939,19 @@ async function playKana(kana, btn) {
     const { out: merged, silenceSecs } = concatItems(items, sr);
     if (!merged.length) throw new Error('읽을 가나가 없음');
     hlSilences = silenceSecs; // 하이라이트가 마침표 경계를 실제 무음에 못박도록 넘긴다
-    fadeEdges(merged, sr); // 시작/끝 클릭 방지
 
-    // 끝에 무음 패딩 — 자연 종료(자동 정지)의 노드 해제·스트림 닫힘이 무음 구간에서
-    // 일어나게 해 "팍" 소리를 분리한다.
+    // 끝에 무음 패딩(자연 종료 시 노드 해제음 분리)을 "먼저" 붙인 뒤 페이드를 건다. 그래야
+    // fadeEdges의 끝 페이드(18ms)가 실제 마지막 음절이 아니라 무음 위에 떨어진다 — 압축
+    // ([속도]↑)된 마지막 음절은 꼬리가 짧아 18ms 페이드에 깎이면 "끊긴" 소리가 났다.
+    // 콘텐츠↔무음 경계는 짧은 declick(4ms)만 걸어 음절을 길게 깎지 않으면서 클릭만 막는다.
     const pad = Math.round(sr * 0.04);
-    buffer = merged.length ? ctx.createBuffer(1, merged.length + pad, sr) : null;
-    if (buffer) buffer.copyToChannel(merged, 0);
+    const full = new Float32Array(merged.length + pad);
+    full.set(merged);
+    const dc = Math.min(Math.round(sr * 0.004), merged.length);
+    for (let i = 0; i < dc; i++) full[merged.length - dc + i] *= 1 - (i + 0.5) / dc;
+    fadeEdges(full, sr); // 시작 declick + 끝(=패딩 무음) 페이드
+    buffer = ctx.createBuffer(1, full.length, sr);
+    buffer.copyToChannel(full, 0);
   } catch (e) {
     console.error(e);
     busy = false;
