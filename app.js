@@ -394,6 +394,15 @@ function preloadVoice(voice = voiceEl.value) {
   ensureVoice(voice).catch(() => {});
 }
 
+// 음성별 음량 보정. AquesTalk phont마다 출력 진폭이 달라(같은 문장 실측 RMS가 -11~-20 dBFS로
+// ~9dB 차이, jgr이 가장 큼) 음성을 바꾸면 체감 크기가 들쭉날쭉했다. 같은 문장을 8음성으로 합성해
+// 잰 RMS를 가장 조용한 음성(r1)에 맞춰 더 큰 음성만 감쇠한다(게인≤1이라 클리핑 위험 없음).
+// 값 갱신: measure-loudness.mjs 참고.
+const VOICE_GAIN = {
+  f1: 0.44, f2: 0.52, m1: 0.97, m2: 0.76,
+  dvd: 0.45, imd1: 0.64, jgr: 0.34, r1: 1.0,
+};
+
 // ── (음성) 코드 태그 ──────────────────────────────────────────────
 // (code)로 그 자리부터 음성을 바꾼다. 유효 코드는 음성 드롭다운 값(f1 m1 dvd …)과 동일.
 //   예) (f2)コンニチ'ハ(m1)ゲンキ?  → 앞은 f2, 뒤는 m1로 합성.
@@ -924,6 +933,8 @@ async function playKana(kana, btn) {
         let m = null;
         if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
         if (m && m.length) {
+          const vg = VOICE_GAIN[span.voice]; // 음성별 음량 보정 (구간 단위라 혼합 음성도 정확)
+          if (vg != null && vg !== 1) for (let i = 0; i < m.length; i++) m[i] *= vg;
           if (items.length && pending > 0) {
             items.push({ data: silenceArr(pending, sr), fade: false, silence: true }); // 쉼 → 무음 삽입
             items.push({ data: m, fade: false });
