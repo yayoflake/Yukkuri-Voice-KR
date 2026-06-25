@@ -743,13 +743,21 @@ function pauseSec(ch) {
   return 0;
 }
 
-// 단위의 앞뒤 쉼 부호(、。)를 떼어 초 단위 길이로 환산하고, 가운데(core)만 합성 텍스트로 남긴다.
-// (앞뒤 쉼은 따로 합성하면 무음→trimEnds로 증발하므로, 명시적 무음으로 단위 사이에 끼운다)
+// 단위의 앞뒤 쉼(、。)을 초로 환산해 떼어내고(명시적 무음으로 단위 사이에 끼움), 가운데만 core로.
+// 앞뒤 쉼을 단위에 그대로 두고 합성하면 무음→trimEnds로 증발해 사라지기 때문이다.
+// 핵심: 쉼이 운율/구간 태그(' < > [..] {..})에 가려 단위 끝/앞에 묻혀 있어도 떼어낸다.
+//   예) …ヌン、、、、、<<[70]  →  앞 ヌン과 뒤 음성/구간 사이 쉼이 <<[70]에 가려 trimEnds로
+//       증발하던 버그. 태그는 소리가 없으므로 core에 그대로 남겨(state는 보존) 쉼만 빼낸다.
+const isAudioChar = (c) => c === 'ー' || /[ァ-ヶぁ-ゖ]/.test(c);
 function splitPause(unit) {
-  let i = 0, j = unit.length, lead = 0, trail = 0, s;
-  while (i < j && (s = pauseSec(unit[i]))) { lead += s; i++; }
-  while (j > i && (s = pauseSec(unit[j - 1]))) { trail += s; j--; }
-  return { lead, core: unit.slice(i, j), trail };
+  const n = unit.length;
+  let a = 0; while (a < n && !isAudioChar(unit[a])) a++;       // 첫 소리 글자
+  let b = n; while (b > a && !isAudioChar(unit[b - 1])) b--;   // 마지막 소리 글자 다음
+  // 앞/뒤 비(非)소리 구간에서 쉼은 무음(lead/trail)으로 빼고, 태그 등 나머지는 core에 남긴다.
+  let lead = 0, trail = 0, leadKeep = '', trailKeep = '';
+  for (let i = 0; i < a; i++) { const s = pauseSec(unit[i]); if (s) lead += s; else leadKeep += unit[i]; }
+  for (let i = b; i < n; i++) { const s = pauseSec(unit[i]); if (s) trail += s; else trailKeep += unit[i]; }
+  return { lead, core: leadKeep + unit.slice(a, b) + trailKeep, trail };
 }
 
 function silenceArr(sec, sr) { return new Float32Array(Math.max(0, Math.round(sec * sr))); }
