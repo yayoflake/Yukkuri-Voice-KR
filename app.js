@@ -1037,6 +1037,11 @@ const exampleList = $('examplelist');
 exampleList.addEventListener('click', (e) => {
   const b = e.target.closest('.example-badge');
   if (!b || busy) return;
+  // 변환과 마찬가지로, 편집창에 직접 고친 내용이 있으면 덮어쓰기 전에 한 번 확인한다.
+  if (kanaDirty && kanaEl.value.trim() &&
+      !confirm('편집한 내용을 덮어씁니다. 계속할까요?')) {
+    return;
+  }
   textEl.value = b.dataset.ko || '';
   // data-kana가 있으면 그 가나를 그대로(운율 태그 보존), 없으면 한국어를 변환해 편집 칸에 넣는다.
   const kana = b.dataset.kana != null ? b.dataset.kana : koreanKana();
