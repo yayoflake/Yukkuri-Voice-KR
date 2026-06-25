@@ -109,6 +109,7 @@ function stopPlayback() {
 // 타이밍: 합성 오디오엔 음소별 시각이 없으므로, 각 덩어리를 모라 수에 비례해 길이를 나눠 갖고,
 // 덩어리 사이 쉼(. ,)은 retimePauses의 실제 목표 길이(초)만큼 시간을 끼워 동기를 맞춘다.
 let hlSegs = null;     // [{ a, b, start }] — 칠할 덩어리 범위[a,b)와 시작시각(초), 텍스트 순
+let hlSilences = null; // 합성이 끼운 문장 사이 무음 구간 [start,end](초) — 마침표 경계의 정확한 앵커
 let hlStart = 0;       // 재생 시작 시점의 ctx.currentTime
 let hlRAF = 0;         // requestAnimationFrame 핸들
 let hlActive = -1;     // 현재 칠해진 덩어리 인덱스(hlSegs 기준)
@@ -232,7 +233,14 @@ function buildHighlight(text, duration, data, sr) {
   }
   if (cur) chunks.push(cur);
 
-  const real = chunks.filter((c) => c.mora > 0);
+  // 0모라 덩어리(예: 마침표 뒤의 [100] 태그)가 마침표 경계를 삼켜 다음 실덩어리가 문장 시작
+  // 표시를 잃지 않게, 그 period를 다음 실덩어리로 전파한다. (real = 모라 있는 덩어리만)
+  const real = [];
+  let carryPeriod = false;
+  for (const c of chunks) {
+    if (c.mora > 0) { c.period = c.period || carryPeriod; real.push(c); carryPeriod = false; }
+    else if (c.period) carryPeriod = true;
+  }
   if (!real.length) { hlSegs = null; return; }
   real[0].period = false; // 첫 문장 앞엔 쉼 없음(trim됨)
 
@@ -250,9 +258,16 @@ function buildHighlight(text, duration, data, sr) {
   const bounds = []; for (let i = 1; i < real.length; i++) if (real[i].period) bounds.push(i);
   let anchors = [];
   if (bounds.length) {
-    const gaps = detectGaps(data, sr, 0.12);
-    const m = Math.min(gaps.length, bounds.length);
-    anchors = gaps.slice().sort((x, y) => (y[1] - y[0]) - (x[1] - x[0])).slice(0, m).sort((x, y) => x[0] - y[0]);
+    if (hlSilences && hlSilences.length) {
+      // 합성이 끼운 문장 사이 무음 = 마침표 경계와 1:1(둘 다 문장 순서). 순서대로 짝지어
+      // 정확히 못박는다(추정 detectGaps보다 정확). 개수가 어긋나면 가능한 만큼만.
+      anchors = hlSilences.slice(0, bounds.length);
+    } else {
+      // 폴백: 파형에서 긴 무음을 탐지해 가장 긴 것부터 경계 수만큼 골라 위치순 정렬.
+      const gaps = detectGaps(data, sr, 0.12);
+      const m = Math.min(gaps.length, bounds.length);
+      anchors = gaps.slice().sort((x, y) => (y[1] - y[0]) - (x[1] - x[0])).slice(0, m).sort((x, y) => x[0] - y[0]);
+    }
   }
   const P = anchors.length;
 
@@ -810,14 +825,18 @@ function normalizeProsodyOutsideTags(s) {
 
 // 오디오/무음 조각들을 잇는다. fade=true(쉼 없는 x 경계)면 등파워 크로스페이드로 매끄럽게
 // 겹치고, 아니면(무음을 낀 경계) 그대로 맞붙인다(조각 끝/시작이 잦아들어 클릭 없음).
+// 반환: { out, silenceSecs }. silenceSecs는 silence:true 조각(문장 사이 쉼)의 [start,end](초) —
+// 하이라이트에서 마침표 문장 경계를 추정 대신 실제 무음 위치에 정확히 못박는 앵커로 쓴다.
 function concatItems(items, sr) {
   items = items.filter((it) => it.data && it.data.length);
-  if (items.length === 0) return new Float32Array(0);
+  if (items.length === 0) return { out: new Float32Array(0), silenceSecs: [] };
   const fadeLen = Math.round(sr * 0.025); // 25ms 겹침
   let cap = 0; for (const it of items) cap += it.data.length;
   const out = new Float32Array(cap);
   out.set(items[0].data, 0);
   let pos = items[0].data.length;
+  const silenceSecs = [];
+  if (items[0].silence) silenceSecs.push([0, pos / sr]);
   for (let i = 1; i < items.length; i++) {
     const s = items[i].data;
     const f = items[i].fade ? Math.min(fadeLen, pos, s.length) : 0;
@@ -828,8 +847,9 @@ function concatItems(items, sr) {
     }
     out.set(s.subarray(f), start + f);
     pos = start + f + (s.length - f);
+    if (items[i].silence) silenceSecs.push([start / sr, pos / sr]);
   }
-  return out.slice(0, pos);
+  return { out: out.slice(0, pos), silenceSecs };
 }
 
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
@@ -892,15 +912,20 @@ async function playKana(kana, btn) {
     let state = atInit || { speed: baseSpeed, semis: 0 }; // 경계 넘어 이어지는 속도·누적 피치
     for (const span of spans) {
       const aq = await ensureVoice(span.voice);
-      // x 경계에 붙은 쉼(,,, 등)은 합성하면 무음→trim으로 증발하므로, 명시적 무음으로 끼운다.
-      for (const u of span.text.split(/[xXｘＸ]/)) {
-        const { lead, core, trail } = splitPause(u);
+      // x(억양 리셋·무쉼 경계)로 먼저 나누고, 다시 문장(。 run) 단위로 더 잘게 쪼개 따로 합성한다.
+      // 긴 글을 한 번에 합성한 뒤 추정으로 [속도] 구간을 자르면 길이에 비례해 오차가 누적돼
+      // 음성·하이라이트가 어긋나므로(특히 쉼이 많은 여러 문장), 문장마다 짧게 합성해 정확도를
+      // 지킨다. 문장 사이 。 쉼은 splitPause가 명시적 무음으로 빼고, 억양은 문장마다 리셋된다
+      // (본래 문장 경계라 자연스럽다). x 경계의 무쉼 크로스페이드는 pending=0이라 그대로 유지.
+      const pieces = span.text.split(/[xXｘＸ]/).flatMap((u) => u.match(/[^。]*。+|[^。]+/g) || [u]);
+      for (const piece of pieces) {
+        const { lead, core, trail } = splitPause(piece);
         pending += lead;
         let m = null;
         if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
         if (m && m.length) {
           if (items.length && pending > 0) {
-            items.push({ data: silenceArr(pending, sr), fade: false }); // 쉼 → 무음 삽입
+            items.push({ data: silenceArr(pending, sr), fade: false, silence: true }); // 쉼 → 무음 삽입
             items.push({ data: m, fade: false });
           } else {
             items.push({ data: m, fade: items.length > 0 }); // 0갭 경계 → 크로스페이드
@@ -911,8 +936,9 @@ async function playKana(kana, btn) {
         }
       }
     }
-    const merged = concatItems(items, sr);
+    const { out: merged, silenceSecs } = concatItems(items, sr);
     if (!merged.length) throw new Error('읽을 가나가 없음');
+    hlSilences = silenceSecs; // 하이라이트가 마침표 경계를 실제 무음에 못박도록 넘긴다
     fadeEdges(merged, sr); // 시작/끝 클릭 방지
 
     // 끝에 무음 패딩 — 자연 종료(자동 정지)의 노드 해제·스트림 닫힘이 무음 구간에서
