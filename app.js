@@ -866,120 +866,88 @@ function concatItems(items, sr) {
 
 // 공통 재생: 주어진 가나 문자열을 합성해 재생한다. btn은 UI를 표시할 버튼.
 // 준비/합성 중이면 무시, 재생 중인 같은 버튼을 다시 누르면 정지, 다른 버튼이면 멈추고 새로 재생.
-async function playKana(kana, btn) {
-  if (busy) return;
-  if (currentSource) {
-    const wasActive = activeBtn === btn;
-    stopPlayback();
-    resetPlayUI();
-    if (wasActive) return;
-  }
-
-  // 합성용으로 가타카나로 정규화하고, 운율 보조 표기(' / 하이픈→장음 ー)도
-  // AquesTalk1이 받는 형태로 정리한다. ([속도] 태그는 ASCII라 정규화에 안 걸림)
-  // 변환결과 칸은 . , 를 ASCII로 보여주지만, 실제 합성은 AquesTalk1 쉼 기호 。 、 로 바꿔 넣는다.
-  // 공백문자(스페이스·탭·줄바꿈)는 합성에서 의미가 없으므로 모두 제거한다.
-  // @ : '여기서부터 재생'. @ 뒤(여러 개면 마지막 @ 기준)만 합성해, 중간을 편집하고도
-  //     매번 처음부터 듣지 않게 한다. (@ 자체는 빠지고, 하이라이트도 @ 뒤만 칠한다 → buildHighlight)
-  //     단, @ 앞에서 지정한 속도·피치([속도] {반음} > <)와 음성((코드))은 @ 시점 상태를
-  //     이어받아 재생한다. parseSegments/voiceAt로 prefix를 끝까지 훑어 마지막 상태를 얻는다
-  //     (x는 일반 글자 취급이라 속도/피치 누적엔 영향 없음 — x는 억양 리셋만).
+// ── 합성 코어: 가나 문자열 → 모노 PCM(Float32) ──────────────────────
+// 실시간 재생(playKana)과 빌드 스크립트(예제 음원 미리 렌더)가 같은 합성 경로를 쓰도록 분리.
+// DOM·재생·busy는 안 건드린다(순수 합성). defaultVoice/baseSpeed는 (음성)·[속도] 태그가 없을
+// 때의 기본값. 반환: { full: Float32Array(끝 무음 패딩·페이드 포함), sr, silenceSecs }. 빈 입력은 throw.
+//
+// 합성용으로 가타카나로 정규화하고, 운율 보조 표기(' / 하이픈→장음 ー)도 AquesTalk1이 받는
+// 형태로 정리한다. . , 는 쉼 기호 。 、 로, 공백은 제거. @는 '여기서부터 재생'(@ 뒤만 합성하되
+// 앞에서 지정한 속도·피치·음성 상태는 이어받음).
+async function synthesizeKana(kana, defaultVoice, baseSpeed) {
   let atInit = null, atVoice = null;
   const atPos = kana.lastIndexOf('@');
   if (atPos >= 0) {
     const prefix = kana.slice(0, atPos);
-    const pre = parseSegments(prefix, Number(speedEl.value));
+    const pre = parseSegments(prefix, baseSpeed);
     atInit = { speed: pre.speed, semis: pre.semis };
-    atVoice = voiceAt(prefix, voiceEl.value);
+    atVoice = voiceAt(prefix, defaultVoice);
     kana = kana.slice(atPos + 1);
   }
-
   kana = normalizeProsodyOutsideTags(hiraToKata(kana))
     .replace(/\./g, '。')
     .replace(/,/g, '、')
     .replace(/\s+/g, '')
     .trim();
   kana = dropDanglingSokuon(kana); // 자음 모라가 안 오는 촉음 ッ 제거 (ERROR 102/이상한 소리 방지)
-  if (!kana) { setError(btn, '가나가 비어 있음'); return; }
+  if (!kana) throw new Error('가나가 비어 있음');
 
-  setError(btn); // 이전 오류 메시지 지우기
-  busy = true;
-  activeBtn = btn;
-  setPlayUI(btn, 'loading');
+  const ctx = getCtx();
+  if (ctx.state === 'suspended') await ctx.resume();
+  const sr = ctx.sampleRate;
 
-  // 1) 음성 로드 + (x로 끊긴) 단위별 합성·후처리 후 이어붙이기 (실제 실패가 날 수 있는 구간)
-  let buffer;
-  try {
-    const ctx = getCtx();
-    if (ctx.state === 'suspended') await ctx.resume();
-    const baseSpeed = Number(speedEl.value);
-    const sr = ctx.sampleRate;
-
-    // (음성)코드로 음성 구간을 나누고, 각 구간 안에서 다시 x(억양 리셋·무쉼 경계)로 합성 단위를
-    // 나눈다. 단위마다 따로 합성해 억양을 리셋하고 쉼 없이 크로스페이드로 잇는다. 속도·피치
-    // 상태(state)와 누적 쉼(pending)은 구간·단위 경계를 넘어 이어진다(태그 없으면 기존과 동일).
-    const spans = splitVoiceSpans(kana, atVoice || voiceEl.value);
-    const items = [];
-    let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
-    let pendingPeriod = false; // 그 누적 무음에 마침표가 끼었나 (하이라이트 문장 앵커 여부)
-    let state = atInit || { speed: baseSpeed, semis: 0 }; // 경계 넘어 이어지는 속도·누적 피치
-    for (const span of spans) {
-      const aq = await ensureVoice(span.voice);
-      // x(억양 리셋·무쉼 경계)로 먼저 나누고, 다시 문장(。 run) 단위로 더 잘게 쪼개 따로 합성한다.
-      // 긴 글을 한 번에 합성한 뒤 추정으로 [속도] 구간을 자르면 길이에 비례해 오차가 누적돼
-      // 음성·하이라이트가 어긋나므로(특히 쉼이 많은 여러 문장), 문장마다 짧게 합성해 정확도를
-      // 지킨다. 문장 사이 。 쉼은 splitPause가 명시적 무음으로 빼고, 억양은 문장마다 리셋된다
-      // (본래 문장 경계라 자연스럽다). x 경계의 무쉼 크로스페이드는 pending=0이라 그대로 유지.
-      const pieces = span.text.split(/[xXｘＸ]/).flatMap((u) => u.match(/[^。]*。+|[^。]+/g) || [u]);
-      for (const piece of pieces) {
-        const { lead, core, trail, leadPeriod, trailPeriod } = splitPause(piece);
-        pending += lead; if (leadPeriod) pendingPeriod = true;
-        let m = null;
-        if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
-        if (m && m.length) {
-          const vg = VOICE_GAIN[span.voice]; // 음성별 음량 보정 (구간 단위라 혼합 음성도 정확)
-          if (vg != null && vg !== 1) for (let i = 0; i < m.length; i++) m[i] *= vg;
-          if (items.length && pending > 0) {
-            // 무음은 삽입하되(오디오 갭 보존), 하이라이트 문장 앵커(silence:true)는 마침표 경계만.
-            // 쉼표만 있는 무음(예: ,x 경계)을 앵커로 잡으면 마침표 경계 수와 안 맞아 뒤가 밀린다.
-            items.push({ data: silenceArr(pending, sr), fade: false, silence: pendingPeriod });
-            items.push({ data: m, fade: false });
-          } else {
-            items.push({ data: m, fade: items.length > 0 }); // 0갭 경계 → 크로스페이드
-          }
-          pending = trail; pendingPeriod = trailPeriod;
+  // (음성)코드로 음성 구간을 나누고, 각 구간 안에서 다시 x(억양 리셋·무쉼 경계)·문장(。 run)
+  // 단위로 더 잘게 쪼개 따로 합성한다. 긴 글을 한 번에 합성한 뒤 추정으로 [속도] 구간을 자르면
+  // 길이에 비례해 오차가 누적돼 음성·하이라이트가 어긋나므로, 문장마다 짧게 합성해 정확도를 지킨다.
+  // 문장 사이 。 쉼은 명시적 무음으로 빼고, 억양은 문장마다 리셋(본래 문장 경계라 자연스럽다).
+  const spans = splitVoiceSpans(kana, atVoice || defaultVoice);
+  const items = [];
+  let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
+  let pendingPeriod = false; // 그 누적 무음에 마침표가 끼었나 (하이라이트 문장 앵커 여부)
+  let state = atInit || { speed: baseSpeed, semis: 0 }; // 경계 넘어 이어지는 속도·누적 피치
+  for (const span of spans) {
+    const aq = await ensureVoice(span.voice);
+    const pieces = span.text.split(/[xXｘＸ]/).flatMap((u) => u.match(/[^。]*。+|[^。]+/g) || [u]);
+    for (const piece of pieces) {
+      const { lead, core, trail, leadPeriod, trailPeriod } = splitPause(piece);
+      pending += lead; if (leadPeriod) pendingPeriod = true;
+      let m = null;
+      if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
+      if (m && m.length) {
+        const vg = VOICE_GAIN[span.voice]; // 음성별 음량 보정 (구간 단위라 혼합 음성도 정확)
+        if (vg != null && vg !== 1) for (let i = 0; i < m.length; i++) m[i] *= vg;
+        if (items.length && pending > 0) {
+          // 무음은 삽입하되(오디오 갭 보존), 하이라이트 문장 앵커(silence:true)는 마침표 경계만.
+          // 쉼표만 있는 무음(예: ,x 경계)을 앵커로 잡으면 마침표 경계 수와 안 맞아 뒤가 밀린다.
+          items.push({ data: silenceArr(pending, sr), fade: false, silence: pendingPeriod });
+          items.push({ data: m, fade: false });
         } else {
-          pending += trail; if (trailPeriod) pendingPeriod = true; // 합성할 게 없으면 쉼만 누적
+          items.push({ data: m, fade: items.length > 0 }); // 0갭 경계 → 크로스페이드
         }
+        pending = trail; pendingPeriod = trailPeriod;
+      } else {
+        pending += trail; if (trailPeriod) pendingPeriod = true; // 합성할 게 없으면 쉼만 누적
       }
     }
-    const { out: merged, silenceSecs } = concatItems(items, sr);
-    if (!merged.length) throw new Error('읽을 가나가 없음');
-    hlSilences = silenceSecs; // 하이라이트가 마침표 경계를 실제 무음에 못박도록 넘긴다
-
-    // 끝에 무음 패딩(자연 종료 시 노드 해제음 분리)을 "먼저" 붙인 뒤 페이드를 건다. 그래야
-    // fadeEdges의 끝 페이드(18ms)가 실제 마지막 음절이 아니라 무음 위에 떨어진다 — 압축
-    // ([속도]↑)된 마지막 음절은 꼬리가 짧아 18ms 페이드에 깎이면 "끊긴" 소리가 났다.
-    // 콘텐츠↔무음 경계는 짧은 declick(4ms)만 걸어 음절을 길게 깎지 않으면서 클릭만 막는다.
-    const pad = Math.round(sr * 0.04);
-    const full = new Float32Array(merged.length + pad);
-    full.set(merged);
-    const dc = Math.min(Math.round(sr * 0.004), merged.length);
-    for (let i = 0; i < dc; i++) full[merged.length - dc + i] *= 1 - (i + 0.5) / dc;
-    fadeEdges(full, sr); // 시작 declick + 끝(=패딩 무음) 페이드
-    buffer = ctx.createBuffer(1, full.length, sr);
-    buffer.copyToChannel(full, 0);
-  } catch (e) {
-    console.error(e);
-    busy = false;
-    setError(btn, '오류: ' + (e?.message || e));
-    resetPlayUI();
-    return;
   }
-  busy = false;
-  if (!buffer) { setError(btn, '합성 결과가 비어 있음'); resetPlayUI(); return; }
+  const { out: merged, silenceSecs } = concatItems(items, sr);
+  if (!merged.length) throw new Error('읽을 가나가 없음');
 
-  // 2) 재생 시작 (Source → Gain → 출력. 정지 시 게인 램프다운으로 클릭 방지)
+  // 끝에 무음 패딩(자연 종료 시 노드 해제음 분리)을 "먼저" 붙인 뒤 페이드를 건다. 그래야
+  // fadeEdges의 끝 페이드(18ms)가 실제 마지막 음절이 아니라 무음 위에 떨어진다 — 압축
+  // ([속도]↑)된 마지막 음절은 꼬리가 짧아 18ms 페이드에 깎이면 "끊긴" 소리가 났다.
+  // 콘텐츠↔무음 경계는 짧은 declick(4ms)만 걸어 음절을 길게 깎지 않으면서 클릭만 막는다.
+  const pad = Math.round(sr * 0.04);
+  const full = new Float32Array(merged.length + pad);
+  full.set(merged);
+  const dc = Math.min(Math.round(sr * 0.004), merged.length);
+  for (let i = 0; i < dc; i++) full[merged.length - dc + i] *= 1 - (i + 0.5) / dc;
+  fadeEdges(full, sr); // 시작 declick + 끝(=패딩 무음) 페이드
+  return { full, sr, silenceSecs };
+}
+
+// 버퍼 재생 (Source → Gain → 출력. 정지 시 게인 램프다운으로 클릭 방지). 고급(아래) 재생이면 하이라이트도.
+function playBuffer(buffer, btn) {
   stopPlayback(); // 혹시 남은 것 정리
   const ctx = getCtx();
   const src = ctx.createBufferSource();
@@ -992,15 +960,103 @@ async function playKana(kana, btn) {
   src.onended = () => { if (currentSource === src) { stopPlayback(); resetPlayUI(); } };
   setPlayUI(btn, 'playing');
   src.start();
-  // 아래쪽(고급) 재생만: 가나 칸의 현재 덩어리를 따라 하이라이트한다.
   if (btn === playKanaBtn) startHighlight(buffer);
 }
+
+// 공통 재생: 주어진 가나를 실시간 합성해 재생한다. btn은 UI를 표시할 버튼.
+// 준비/합성 중이면 무시, 재생 중인 같은 버튼을 다시 누르면 정지, 다른 버튼이면 멈추고 새로 재생.
+async function playKana(kana, btn) {
+  if (busy) return;
+  if (currentSource) {
+    const wasActive = activeBtn === btn;
+    stopPlayback();
+    resetPlayUI();
+    if (wasActive) return;
+  }
+  setError(btn); // 이전 오류 메시지 지우기
+  busy = true;
+  activeBtn = btn;
+  setPlayUI(btn, 'loading');
+
+  let buffer;
+  try {
+    const { full, sr, silenceSecs } = await synthesizeKana(kana, voiceEl.value, Number(speedEl.value));
+    hlSilences = silenceSecs; // 하이라이트가 마침표 경계를 실제 무음에 못박도록 넘긴다
+    buffer = getCtx().createBuffer(1, full.length, sr);
+    buffer.copyToChannel(full, 0);
+  } catch (e) {
+    console.error(e);
+    busy = false;
+    setError(btn, '오류: ' + (e?.message || e));
+    resetPlayUI();
+    return;
+  }
+  busy = false;
+  if (!buffer) { setError(btn, '합성 결과가 비어 있음'); resetPlayUI(); return; }
+  playBuffer(buffer, btn);
+}
+
+// 미리 렌더한 예제 음원(audio/<id>.mp3)을 받아 재생 — v86 부팅 없이 즉시 듣게 한다.
+// 음원이 없거나(빌드 전) 디코드 실패 시엔 실시간 합성 경로(playKana)로 조용히 폴백한다.
+// 하이라이트 앵커(문장 경계 무음 위치)는 매니페스트의 silences를 그대로 쓴다.
+async function playPrerendered(id, entry, btn) {
+  if (busy) return;
+  if (currentSource) {
+    const wasActive = activeBtn === btn;
+    stopPlayback();
+    resetPlayUI();
+    if (wasActive) return;
+  }
+  setError(btn);
+  busy = true;
+  activeBtn = btn;
+  setPlayUI(btn, 'loading');
+
+  let buffer;
+  try {
+    const ctx = getCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const url = new URL('audio/' + id + '.mp3', document.baseURI).href;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('audio ' + resp.status);
+    buffer = await ctx.decodeAudioData(await resp.arrayBuffer());
+    hlSilences = entry.silences || null;
+  } catch (e) {
+    busy = false;
+    resetPlayUI();
+    playKana(kanaEl.value, btn); // 음원 없음/디코드 실패 → 실시간 합성으로 (앱이 항상 동작하게)
+    return;
+  }
+  busy = false;
+  playBuffer(buffer, btn);
+}
+
+// 빌드 스크립트(예제 음원 미리 렌더)용 훅. 브라우저 일반 사용엔 영향 없다.
+// 클릭 핸들러와 똑같이 가나를 구해(data-kana 우선, 없으면 한국어 변환) 합성하고, 16-bit PCM을
+// base64로 돌려준다(큰 Float32 배열을 evaluate JSON으로 넘기지 않으려고). silences는 하이라이트 앵커.
+window.__renderExample = async (id) => {
+  const b = document.getElementById(id);
+  if (!b) throw new Error('no example ' + id);
+  textEl.value = b.dataset.ko || '';
+  const kana = b.dataset.kana != null ? b.dataset.kana : koreanKana();
+  const { full, sr, silenceSecs } = await synthesizeKana(kana, voiceEl.value, Number(speedEl.value));
+  const pcm = new Int16Array(full.length);
+  for (let i = 0; i < full.length; i++) {
+    const s = Math.max(-1, Math.min(1, full[i]));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  const bytes = new Uint8Array(pcm.buffer);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return { sr, silences: silenceSecs, pcm16: btoa(bin) };
+};
 
 // ▼ 변환 버튼을 눌러야 비로소 한국어 칸 → 고급 편집 칸으로 옮긴다(실시간 갱신 안 함).
 convertBtn.addEventListener('click', regenerate);
 // 가나 칸을 직접 고치면 편집 플래그를 세우고 한국어 읽기 보조 표기도 따라 갱신
 kanaEl.addEventListener('input', () => {
-  if (!suppressDirty) kanaDirty = true;
+  if (!suppressDirty) { kanaDirty = true; currentExampleId = null; } // 직접 고치면 미리 렌더 음원 무효
   updateKanaRead();
 });
 // 자동 / 토글 버튼: 켜고 끌 때 상태만 바꾼다. 고급 편집 칸은 ▼ 변환을 눌러야 갱신된다.
@@ -1012,8 +1068,9 @@ autoSlashBtn.addEventListener('click', () => {
 speedEl.addEventListener('input', () => { speedVal.textContent = speedEl.value; });
 // 위쪽(라이트): 한국어 칸을 단순 변환해 재생
 playBtn.addEventListener('click', () => playKana(koreanKana(), playBtn));
-// 아래쪽(고급): 가나 칸을 그대로(직접 넣은 ' / 포함) 재생
-playKanaBtn.addEventListener('click', () => playKana(kanaEl.value, playKanaBtn));
+// 아래쪽(고급): 가나 칸을 그대로(직접 넣은 ' / 포함) 재생. 편집 안 한 예제면 미리 렌더 음원으로
+// 즉시(에뮬레이터 부팅 없이) 다시 들을 수 있게 한다.
+playKanaBtn.addEventListener('click', () => playEditedKana(playKanaBtn));
 // 음성을 바꾸면 재생 중인 소리는 멈춤
 voiceEl.addEventListener('change', () => { if (currentSource) { stopPlayback(); resetPlayUI(); } preloadVoice(); });
 
@@ -1095,14 +1152,32 @@ const RICH_EXAMPLES = {
   'ex-mesmerizer': {
     ko: `콘나 지다이니 아츠라에타 미테쿠레노 키쟈쿠세이에이에
 혼토-노 시바이데 다마사레루 야타라토 우루사이 신조-노 코도-`,
-    kana: `(f1)[250]{+7}コ----ン----ナ---->>ジ----<<ダ----イ-----ニ---->>ア----<<ツ---------<<ラ---------<エ---------<<タ---<<ミ----->>テ----<<ク---->>レ----<<ノ---->>キ---->>ジャ----.セ------------>イ-----<エ----->イ-----<エ--------x
-{+2}ホ----<<ン----{+7}ト--------ノ---->>シ----<<バ----イ----デ---->>ダ-----<<マ--------<<サ---------<レ---------<<ル----
-<<ヤ---->>タ----<<ラ---->>ト----<<ウ---->>ル----{+12}サ----イ----{+9}シ----ン-------<<ジョ----<<ノ----<コ---->ヲ----<ド---->ヲ----`,
+    kana: `(f1)[250]{+7}コ----ン----ナ---->>ジ----<<ダ----イ-----ニ---->>ア----<<ツ---------<<ラ---------<エ---------<<タ---<<ミ----->>テ----<<ク---->>レ----<<ノ---->>キ---->>ジャ----,xセ------------>イ-----<エ----->イ-----<エ--------x
+{+2}ホ-----<<ン----{+7}ト--------ノ---->>シ----<<バ----イ----デ---->>ダ-----<<マ--------<<サ---------<レ---------<<ル----
+<<ヤ---->>タ----<<ラ---->>ト----<<ウ---->>ル----{+12}サ----イ----{+9}シ----ン------<<ジョ-----<<ノ----<コ---->ヲ----<ド---->ヲ----`,
   },
 };
 for (const [id, ex] of Object.entries(RICH_EXAMPLES)) {
   const el = $(id);
   if (el) { el.dataset.ko = ex.ko; el.dataset.kana = ex.kana; }
+}
+
+// 미리 렌더한 예제 음원 매니페스트(audio/examples.json: { id → { silences } }). 페이지 로드 시
+// 한 번 받아 둔다(작은 JSON). 못 받으면(빌드 전 등) 빈 채로 두고 예제는 실시간 합성으로 폴백한다.
+let exampleAudio = {};
+fetch(new URL('audio/examples.json', document.baseURI).href)
+  .then((r) => (r.ok ? r.json() : {}))
+  .then((m) => { exampleAudio = m || {}; })
+  .catch(() => {});
+
+// 마지막으로 예제 뱃지로 채운 편집 칸의 예제 id. 편집 칸이 그 예제 그대로면(직접 안 고쳤으면)
+// 재생도 미리 렌더 음원으로 즉시 듣는다. 직접 고치면(input) 무효화돼 실시간 합성으로 돌아간다.
+let currentExampleId = null;
+// 편집 칸이 예제 그대로면 미리 렌더 음원으로, 아니면 실시간 합성으로 재생한다.
+function playEditedKana(btn) {
+  const entry = currentExampleId && exampleAudio[currentExampleId];
+  if (entry) playPrerendered(currentExampleId, entry, btn);
+  else playKana(kanaEl.value, btn);
 }
 
 // 예제 뱃지: 누르면 한국어 입력창·편집 칸에 예문을 채우고 곧바로 (고급) 재생한다.
@@ -1124,8 +1199,9 @@ exampleList.addEventListener('click', (e) => {
   kanaEl.value = displayKana(kana); // 히라가나 모드면 표시만 히라가나로
   updateKanaRead();
   kanaDirty = false;
+  currentExampleId = b.id || null; // 이 예제 그대로면 재생도 미리 렌더 음원 사용
   if (currentSource) { stopPlayback(); resetPlayUI(); } // 재생 중이면 멈추고 새 예문 재생
-  playKana(kanaEl.value, playKanaBtn);
+  playEditedKana(playKanaBtn);
 });
 
 // ── 가나 키보드 ───────────────────────────────────────────────────
@@ -1296,4 +1372,6 @@ regenerate();
 
 // 기본 음성을 백그라운드로 예열한다(첫 페인트는 막지 않도록 idle/다음 틱에).
 // 사용자가 타이핑하는 동안 v86 부팅이 끝나, 첫 재생 버튼이 바로 소리를 낸다.
-(window.requestIdleCallback || ((fn) => setTimeout(fn, 200)))(() => preloadVoice());
+// (?nopreload — 예제 음원 빌드 시엔 예열 인스턴스가 렌더와 v86 메모리를 다퉈 할당이 실패하므로 끈다)
+if (!/[?&]nopreload\b/.test(location.search))
+  (window.requestIdleCallback || ((fn) => setTimeout(fn, 200)))(() => preloadVoice());
