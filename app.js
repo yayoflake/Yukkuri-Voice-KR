@@ -778,10 +778,13 @@ function splitPause(unit) {
   let a = 0; while (a < n && !isAudioChar(unit[a])) a++;       // 첫 소리 글자
   let b = n; while (b > a && !isAudioChar(unit[b - 1])) b--;   // 마지막 소리 글자 다음
   // 앞/뒤 비(非)소리 구간에서 쉼은 무음(lead/trail)으로 빼고, 태그 등 나머지는 core에 남긴다.
-  let lead = 0, trail = 0, leadKeep = '', trailKeep = '';
-  for (let i = 0; i < a; i++) { const s = pauseSec(unit[i]); if (s) lead += s; else leadKeep += unit[i]; }
-  for (let i = b; i < n; i++) { const s = pauseSec(unit[i]); if (s) trail += s; else trailKeep += unit[i]; }
-  return { lead, core: leadKeep + unit.slice(a, b) + trailKeep, trail };
+  // leadPeriod/trailPeriod: 그 쉼에 마침표(。/.)가 끼었는지 — 하이라이트는 마침표 경계만
+  // 문장 앵커로 세므로, 쉼표(,)만 있는 무음(특히 ,x 경계)은 앵커로 안 잡으려고 구분한다.
+  const isPeriod = (c) => c === '。' || c === '.';
+  let lead = 0, trail = 0, leadKeep = '', trailKeep = '', leadPeriod = false, trailPeriod = false;
+  for (let i = 0; i < a; i++) { const c = unit[i], s = pauseSec(c); if (s) { lead += s; if (isPeriod(c)) leadPeriod = true; } else leadKeep += c; }
+  for (let i = b; i < n; i++) { const c = unit[i], s = pauseSec(c); if (s) { trail += s; if (isPeriod(c)) trailPeriod = true; } else trailKeep += c; }
+  return { lead, core: leadKeep + unit.slice(a, b) + trailKeep, trail, leadPeriod, trailPeriod };
 }
 
 function silenceArr(sec, sr) { return new Float32Array(Math.max(0, Math.round(sec * sr))); }
@@ -918,6 +921,7 @@ async function playKana(kana, btn) {
     const spans = splitVoiceSpans(kana, atVoice || voiceEl.value);
     const items = [];
     let pending = 0; // 다음 오디오 앞에 넣을 누적 무음(초)
+    let pendingPeriod = false; // 그 누적 무음에 마침표가 끼었나 (하이라이트 문장 앵커 여부)
     let state = atInit || { speed: baseSpeed, semis: 0 }; // 경계 넘어 이어지는 속도·누적 피치
     for (const span of spans) {
       const aq = await ensureVoice(span.voice);
@@ -928,22 +932,24 @@ async function playKana(kana, btn) {
       // (본래 문장 경계라 자연스럽다). x 경계의 무쉼 크로스페이드는 pending=0이라 그대로 유지.
       const pieces = span.text.split(/[xXｘＸ]/).flatMap((u) => u.match(/[^。]*。+|[^。]+/g) || [u]);
       for (const piece of pieces) {
-        const { lead, core, trail } = splitPause(piece);
-        pending += lead;
+        const { lead, core, trail, leadPeriod, trailPeriod } = splitPause(piece);
+        pending += lead; if (leadPeriod) pendingPeriod = true;
         let m = null;
         if (core) { const r = await synthUnit(aq, ctx, core, baseSpeed, state); state = r.state; m = r.data; }
         if (m && m.length) {
           const vg = VOICE_GAIN[span.voice]; // 음성별 음량 보정 (구간 단위라 혼합 음성도 정확)
           if (vg != null && vg !== 1) for (let i = 0; i < m.length; i++) m[i] *= vg;
           if (items.length && pending > 0) {
-            items.push({ data: silenceArr(pending, sr), fade: false, silence: true }); // 쉼 → 무음 삽입
+            // 무음은 삽입하되(오디오 갭 보존), 하이라이트 문장 앵커(silence:true)는 마침표 경계만.
+            // 쉼표만 있는 무음(예: ,x 경계)을 앵커로 잡으면 마침표 경계 수와 안 맞아 뒤가 밀린다.
+            items.push({ data: silenceArr(pending, sr), fade: false, silence: pendingPeriod });
             items.push({ data: m, fade: false });
           } else {
             items.push({ data: m, fade: items.length > 0 }); // 0갭 경계 → 크로스페이드
           }
-          pending = trail;
+          pending = trail; pendingPeriod = trailPeriod;
         } else {
-          pending += trail; // 합성할 게 없으면(순수 쉼 단위 등) 쉼만 누적
+          pending += trail; if (trailPeriod) pendingPeriod = true; // 합성할 게 없으면 쉼만 누적
         }
       }
     }
