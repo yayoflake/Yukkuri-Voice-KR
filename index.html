@@ -13,7 +13,7 @@
     align-items:center; justify-content:center;
     background:var(--bg); color:var(--text);
     font-family:"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
-    padding:24px;
+    padding:14px;
   }
   .card {
     width:100%; max-width:560px; background:var(--card); border:1px solid var(--line);
@@ -81,7 +81,7 @@
   .switch.active .track { background:var(--accent); }
   .switch:hover:not(:disabled) .track { filter:brightness(.97); }
   .switch.active .knob { left:18px; }
-  .kana-tools { display:flex; align-items:center; gap:12px; }
+  .kana-tools { display:flex; align-items:center; gap:7px; }
   .kana-tools .switch { margin-top:0; }
   /* 편집 라벨 + 복사 버튼 묶음 (kana-head 왼쪽). label 기본 line-height 탓에 아이콘과
      세로가 어긋나므로 line-height:1로 맞춰 가운데 정렬을 딱 맞춘다. */
@@ -210,7 +210,7 @@
 </head>
 <body>
   <div class="card">
-    <h1>윳쿠리 보이스 🗣️</h1>
+    <h1>윳쿠리 보이스 KR</h1>
     <p class="sub">한국어를 가타카나로 변환해 AquesTalk1 음성으로 읽습니다.</p>
 
     <label for="text">한국어 입력</label>
@@ -238,7 +238,7 @@
         <button type="button" class="example-badge" id="ex-meow"><span class="play-ico" aria-hidden="true">▶</span>야옹</button>
         <button type="button" class="example-badge" id="ex-scary"><span class="play-ico" aria-hidden="true">▶</span>무서운 이야기</button>
         <button type="button" class="example-badge" id="ex-poem"><span class="play-ico" aria-hidden="true">▶</span>권두시</button>
-        <button type="button" class="example-badge" id="ex-mesmerizer"><span class="play-ico" aria-hidden="true">▶</span>메스머라이저</button>
+        <button type="button" class="example-badge" id="ex-mesmerizer"><span class="play-ico" aria-hidden="true">▶</span>노래</button>
       </div>
     </details>
 
@@ -257,7 +257,7 @@
         <div class="kana-tools">
           <button type="button" id="hiratoggle" class="kb-toggle hira-toggle" role="switch"
                   aria-pressed="false" title="예시·키보드·편집창을 히라가나로 표시">
-            <span class="ah" aria-hidden="true">あ</span>히라가나
+            <span class="ah" aria-hidden="true">あ</span>
           </button>
           <div class="kb-wrap">
             <button type="button" id="kbtoggle" class="kb-toggle" aria-label="가나 키보드" title="가나 키보드">
@@ -300,9 +300,7 @@
         </div>
         <div class="examples">
           <span class="lead">예)</span>
-          <span><code>(f2)コンニチ'ハ/ミナサ-ン.</code></span>
           <span><code>[250]ハヤク[-100]x{+4}&gt;ユックリ&lt;.</code></span>
-          <span><code>サイショハトバシテ@ココカラ</code></span>
           <span><code>マッテ...ネ</code> <code>アノ,,,エート</code> (쉼표 중첩 가능)</span>
         </div>
       </details>
@@ -332,9 +330,9 @@
 
   <footer class="footer">
     <span>윳쿠리 보이스 (한국어) · AquesTalk1 음성 합성</span>
-    <span>한글을 가타카나로 바꿔 브라우저에서 바로 합성합니다.</span>
+    <span>Created by <a href="https://akdangchan.moe/" target="_blank" rel="noopener">악당수업</a></span>
   </footer>
 
-  <script type="module" src="./app.js?v=20260626h"></script>
+  <script type="module" src="./app.js?v=20260626i"></script>
 </body>
 </html>

@@ -1312,7 +1312,9 @@ function insertKana(text) {
   kanaEl.value = kanaEl.value.slice(0, s) + text + kanaEl.value.slice(e);
   const pos = s + text.length;
   caret = { s: pos, e: pos };
-  kanaEl.setSelectionRange(pos, pos);
+  // 칸이 포커스돼 있을 때만 DOM 선택을 옮긴다. 가상키보드로 입력할 땐 칸이 포커스되지
+  // 않으므로(모바일에서 캐럿/OS키보드가 튀는 것 방지) caret만 기억해 둔다.
+  if (document.activeElement === kanaEl) kanaEl.setSelectionRange(pos, pos);
   kanaDirty = true;
   updateKanaRead();
 }
@@ -1324,7 +1326,7 @@ function backspaceKana() {
   if (s === e) { if (s === 0) return; s -= 1; }
   kanaEl.value = kanaEl.value.slice(0, s) + kanaEl.value.slice(e);
   caret = { s, e: s };
-  kanaEl.setSelectionRange(s, s);
+  if (document.activeElement === kanaEl) kanaEl.setSelectionRange(s, s);
   kanaDirty = true;
   updateKanaRead();
 }
