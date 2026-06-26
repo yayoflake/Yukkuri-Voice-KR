@@ -6,14 +6,12 @@
   "description": "한국어 텍스트를 가타카나로 변환해 윳쿠리 보이스(AquesTalk1)로 읽어주는 정적 웹앱",
   "scripts": {
     "serve": "node serve.mjs",
-    "test": "node test/validate.mjs",
-    "build:examples": "node build-examples.mjs"
+    "test": "node test/validate.mjs"
   },
   "dependencies": {
     "aquestalk.js": "^1.0.6"
   },
   "devDependencies": {
-    "@breezystack/lamejs": "^1.2.7",
     "puppeteer-core": "^22.0.0"
   }
 }
