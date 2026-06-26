@@ -363,6 +363,7 @@ function regenerate() {
   setKanaValue(displayKana(koreanKana()));
   updateKanaRead();
   kanaDirty = false;
+  currentExampleId = null; // 새로 변환했으니 미리 렌더 예제 음원이 아닌 실시간 합성으로
 }
 
 // 진행 중인 로드 Promise(voice→Promise). 예열과 재생이 동시에 같은 음성을 요청해도
