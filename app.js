@@ -114,7 +114,9 @@ function stopPlayback() {
 // 덩어리 사이 쉼(. ,)은 retimePauses의 실제 목표 길이(초)만큼 시간을 끼워 동기를 맞춘다.
 let hlSegs = null;     // [{ a, b, start }] — 칠할 덩어리 범위[a,b)와 시작시각(초), 텍스트 순
 let hlSilences = null; // 합성이 끼운 문장 사이 무음 구간 [start,end](초) — 마침표 경계의 정확한 앵커
-let hlStart = 0;       // 재생 시작 시점의 ctx.currentTime
+let hlStart = 0;       // 재생 시작(출력지연 보정 포함) 기준 performance.now()(ms). elapsed 계산 기준.
+                       // ctx.currentTime은 일부 브라우저에서 출력버퍼 단위로 뚝뚝 점프해 짧은 청크를
+                       // 건너뛰므로, 매끈한 고해상도 시계인 performance.now()로 잰다.
 let hlRAF = 0;         // requestAnimationFrame 핸들
 let hlActive = -1;     // 현재 칠해진 덩어리 인덱스(hlSegs 기준)
 let hlOn = false;      // 현재 div로 바꿔치기(하이라이트 표시) 중인가
@@ -298,7 +300,7 @@ function buildHighlight(text, duration, data, sr) {
 // 쉼 구간엔 직전 덩어리가 계속 켜져 있고, 덩어리 사이에 빈틈이 안 생긴다.
 function highlightTick() {
   if (!hlSegs || !audioCtx) return;
-  const elapsed = audioCtx.currentTime - hlStart;
+  const elapsed = (performance.now() - hlStart) / 1000;
   let k = -1;
   for (let i = 0; i < hlSegs.length; i++) { if (elapsed >= hlSegs[i].start) k = i; else break; }
   if (k !== hlActive) paintHighlight(k);
@@ -313,10 +315,10 @@ function startHighlight(buffer) {
   if (!hlSegs) return;
   showKanaView();
   paintHighlight(0);
-  // 하이라이트는 ctx.currentTime 기준인데 실제 들리는 소리는 출력 지연만큼 늦다. 그만큼
-  // 시작 기준시각을 미뤄 들리는 소리에 맞춘다(브라우저가 안 주면 0, 과대값은 0.2s로 캡).
+  // 실제 들리는 소리는 출력 지연만큼 늦다. 그만큼 시작 기준시각을 미뤄 들리는 소리에 맞춘다
+  // (브라우저가 안 주면 0, 과대값은 0.4s로 캡). performance.now()(ms) 기준이라 *1000.
   const lat = Math.min(0.4, audioCtx.outputLatency || audioCtx.baseLatency || 0);
-  hlStart = audioCtx.currentTime + lat;
+  hlStart = performance.now() + lat * 1000;
   hlRAF = requestAnimationFrame(highlightTick);
 }
 
