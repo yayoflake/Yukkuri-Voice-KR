@@ -318,6 +318,14 @@ function startHighlight(buffer) {
   const lat = Math.min(0.4, audioCtx.outputLatency || audioCtx.baseLatency || 0);
   hlStart = audioCtx.currentTime + lat;
   hlRAF = requestAnimationFrame(highlightTick);
+  // ── [임시 디버그] 출력지연 보정값 확인 — 확인 후 제거 ──
+  try {
+    const ol = audioCtx.outputLatency, bl = audioCtx.baseLatency;
+    msgKanaEl.style.color = '#0a0';
+    msgKanaEl.textContent =
+      `DBG ol=${ol == null ? 'n/a' : ol.toFixed(4)} bl=${bl == null ? 'n/a' : bl.toFixed(4)} ` +
+      `lat=${lat.toFixed(4)} sr=${audioCtx.sampleRate} st=${audioCtx.state}`;
+  } catch { /* 무시 */ }
 }
 
 // 띄어쓰기를 악센트구 구분자 / 로 자동 변환할지 (토글 버튼으로 켜고 끔)
